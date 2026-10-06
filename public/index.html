@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<title>오늘, 해냈어요 - 복약 알리미</title>
+<meta name="description" content="복약 순응도를 높이는 어르신 맞춤 복약 자가관리 앱">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#1DB876">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="오늘, 해냈어요">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" href="./icon-192.png">
+<style>
+:root{
+  --bg:#F4F6F8;
+  --card:#FFFFFF;
+  --text:#23272B;
+  --text-sub:#8A9099;
+  --text-faint:#B3B9C0;
+  --primary:#1DB876;
+  --primary-deep:#149A61;
+  --primary-tint:#E6F8EF;
+  --amber:#FFC94D;
+  --amber-tint:#FFF7E4;
+  --coral:#FF6F5E;
+  --coral-tint:#FFEFEC;
+  --line:#EEF1F3;
+  --shadow:0 2px 10px rgba(20,30,40,0.06);
+  --shadow-md:0 4px 16px rgba(20,30,40,0.08);
+  --r-lg:24px;
+  --r-md:18px;
+  --r-sm:12px;
+  --font-base:16px;
+}
+*{box-sizing:border-box;}
+html{font-size:var(--font-base);}
+body{
+  margin:0;
+  background:var(--bg);
+  font-family:-apple-system, BlinkMacSystemFont, "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  color:var(--text);
+  -webkit-tap-highlight-color:transparent;
+}
+button, input{font-family:inherit;}
+.app{
+  max-width:480px;
+  margin:0 auto;
+  min-height:100vh;
+  position:relative;
+  background:var(--bg);
+  overflow-x:hidden;
+}
+
+/* ---------- Tab views ---------- */
+.tab-view{display:none;}
+.tab-view.active{display:block; animation:fadeIn .3s ease;}
+@keyframes fadeIn{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+@keyframes slideIn{ from{transform:translateX(100%);} to{transform:translateX(0);} }
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001s !important; transition:none !important;}
+}
+.tab-content{padding:0 18px calc(96px + env(safe-area-inset-bottom));}
+
+/* ---------- Home header ---------- */
+.home-topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:calc(16px + env(safe-area-inset-top)) 18px 8px;
+}
+.icon-btn{
+  width:40px; height:40px;
+  border:none; background:none;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.3rem;
+  color:var(--text);
+  cursor:pointer;
+  position:relative;
+  border-radius:50%;
+}
+.icon-btn:active{background:var(--line);}
+.brand-word{font-size:1.05rem; font-weight:800; color:var(--text);}
+.badge-dot{
+  position:absolute; top:6px; right:6px;
+  width:8px; height:8px; border-radius:50%;
+  background:var(--coral);
+  display:none;
+}
+.badge-dot.show{display:block;}
+
+/* ---------- Simple root-tab header (복약체크/기록/건강정보/마이페이지) ---------- */
+.root-topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:calc(18px + env(safe-area-inset-top)) 18px 6px;
+}
+.root-title{font-size:1.25rem; font-weight:800;}
+
+.greeting-block{padding:4px 18px 14px;}
+.greeting-block .hello{font-size:1.02rem; color:var(--text-sub); margin:0 0 2px;}
+.greeting-block .name-line{font-size:1.28rem; font-weight:800; margin:0 0 4px;}
+.greeting-block .sub-line{font-size:0.92rem; color:var(--text-sub); margin:0;}
+
+/* ---------- Generic card ---------- */
+.card{
+  background:var(--card);
+  border-radius:var(--r-lg);
+  box-shadow:var(--shadow);
+  padding:20px;
+  margin:14px 0;
+}
+.card.pad-md{border-radius:var(--r-md); padding:16px;}
+.card.pad-sm{border-radius:var(--r-sm); padding:14px;}
+.card.tap{cursor:pointer;}
+.card.tap:active{transform:scale(.99);}
+
+.status-pill-card{
+  display:flex; align-items:center; gap:10px;
+  background:var(--card);
+  border-radius:999px;
+  box-shadow:var(--shadow);
+  padding:14px 18px;
+  margin:4px 0 14px;
+  cursor:pointer;
+  min-height:56px;
+}
+.status-pill-card .txt{flex:1; font-size:0.98rem; font-weight:600;}
+.status-pill-card .chev{color:var(--text-faint); font-size:1.1rem;}
+
+/* ---------- Arc progress (home / schedule) ---------- */
+.arc-card-head{display:flex; justify-content:space-between; align-items:flex-start;}
+.arc-card-title{font-size:0.92rem; color:var(--text-sub); margin:0 0 2px;}
+.arc-card-num{font-size:1.55rem; font-weight:800; margin:0;}
+.arc-card-num span{font-size:1rem; font-weight:600; color:var(--text-sub);}
+.arc-card-sub{font-size:0.85rem; color:var(--text-sub); margin-top:2px;}
+.arc-wrap{position:relative; margin-top:6px;}
+.arc-svg{width:100%; display:block;}
+.slot-chip-row{display:flex; gap:8px; margin-top:10px;}
+.slot-chip{
+  flex:1;
+  border-radius:16px;
+  background:#F6F7F9;
+  padding:10px 4px 8px;
+  text-align:center;
+  position:relative;
+  cursor:pointer;
+  border:2px solid transparent;
+}
+.slot-chip .emoji{font-size:1.3rem; display:block;}
+.slot-chip .label{font-size:0.78rem; color:var(--text-sub); margin-top:2px; font-weight:600;}
+.slot-chip .time{font-size:0.7rem; color:var(--text-faint);}
+.slot-chip.current{background:var(--primary-tint); border-color:var(--primary);}
+.slot-chip.current .label{color:var(--primary-deep);}
+.slot-chip.taken::after{
+  content:"✓";
+  position:absolute; top:2px; right:8px;
+  color:var(--primary); font-weight:800; font-size:0.85rem;
+}
+.slot-chip.selected{border-color:var(--text);}
+
+/* ---------- Encourage card ---------- */
+.encourage-card{display:flex; align-items:center; gap:12px;}
+.encourage-icon{
+  width:42px; height:42px; border-radius:50%;
+  background:var(--primary-tint);
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.3rem; flex-shrink:0;
+}
+.encourage-text b{display:block; font-size:0.96rem;}
+.encourage-text span{font-size:0.85rem; color:var(--text-sub);}
+
+/* ---------- Section header ---------- */
+.section-head{display:flex; justify-content:space-between; align-items:center; margin:18px 4px 10px;}
+.section-head h2{font-size:1.08rem; font-weight:800; margin:0;}
+.section-head .more{font-size:0.85rem; color:var(--text-sub); cursor:pointer;}
+
+/* ---------- Illustration banner card ---------- */
+.illust{
+  width:100%; height:120px;
+  border-radius:var(--r-md);
+  display:flex; align-items:center; justify-content:center;
+  font-size:2.6rem;
+  margin-bottom:0;
+}
+.illust-hero{height:150px; border-radius:var(--r-md) var(--r-md) 0 0; font-size:3.2rem;}
+.tip-illust-card{padding:0; overflow:hidden;}
+.tip-illust-body{padding:16px;}
+.tip-illust-body b{display:block; font-size:1rem; margin-bottom:4px;}
+.tip-illust-body span{font-size:0.85rem; color:var(--text-sub); line-height:1.4;}
+
+/* ---------- Horizontal scroll stat row ---------- */
+.hscroll{
+  display:flex; gap:10px;
+  overflow-x:auto;
+  padding:2px 0 8px;
+  scrollbar-width:none;
+}
+.hscroll::-webkit-scrollbar{display:none;}
+.stat-mini{
+  flex:0 0 auto;
+  min-width:118px;
+  background:var(--card);
+  border-radius:var(--r-md);
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+.stat-mini .emoji{font-size:1.4rem;}
+.stat-mini b{display:block; font-size:1.15rem; margin-top:4px;}
+.stat-mini span{font-size:0.76rem; color:var(--text-sub);}
+
+/* ---------- Row-card (list card w/ image thumb) ---------- */
+.row-card{
+  display:flex; align-items:center; gap:12px;
+  background:var(--card);
+  border-radius:var(--r-md);
+  box-shadow:var(--shadow);
+  padding:12px;
+  margin:10px 0;
+  cursor:pointer;
+}
+.row-card:active{transform:scale(.99);}
+.row-thumb{
+  width:56px; height:56px; border-radius:14px;
+  flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.5rem;
+}
+.row-main{flex:1; min-width:0;}
+.row-main b{display:block; font-size:0.94rem;}
+.row-main span{display:block; font-size:0.8rem; color:var(--text-sub); margin-top:2px; line-height:1.4;}
+
+/* ---------- 2-col grid tip cards ---------- */
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.tip-mini{
+  background:var(--card);
+  border-radius:var(--r-md);
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+.tip-mini .emoji{font-size:1.5rem;}
+.tip-mini b{display:block; font-size:0.9rem; margin-top:8px;}
+.tip-mini span{display:block; font-size:0.78rem; color:var(--text-sub); margin-top:2px; line-height:1.4;}
+
+/* ---------- Filter chips ---------- */
+.chip-filter-row{display:flex; gap:8px; overflow-x:auto; padding:4px 0 4px; scrollbar-width:none;}
+.chip-filter-row::-webkit-scrollbar{display:none;}
+.chip-filter{
+  flex:0 0 auto;
+  border:1.5px solid var(--line);
+  background:var(--card);
+  color:var(--text-sub);
+  border-radius:999px;
+  padding:8px 16px;
+  font-size:0.86rem;
+  cursor:pointer;
+  min-height:38px;
+}
+.chip-filter.active{background:var(--primary); border-color:var(--primary); color:#fff; font-weight:700;}
+
+/* ---------- Badge ---------- */
+.badge-tag{
+  display:inline-block;
+  background:var(--amber-tint);
+  color:#9C6E00;
+  font-size:0.72rem;
+  font-weight:700;
+  padding:3px 9px;
+  border-radius:999px;
+  margin-bottom:6px;
+}
+.status-badge{
+  font-size:0.76rem; font-weight:700;
+  padding:4px 10px; border-radius:999px;
+}
+.status-badge.done{background:var(--primary-tint); color:var(--primary-deep);}
+.status-badge.pending{background:#F1F3F5; color:var(--text-sub);}
+.status-badge.warn{background:var(--coral-tint); color:#C4432F;}
+
+/* ---------- Buttons ---------- */
+.btn-primary{
+  width:100%;
+  min-height:54px;
+  border:none;
+  border-radius:var(--r-sm);
+  background:var(--primary);
+  color:#fff;
+  font-size:1rem;
+  font-weight:800;
+  cursor:pointer;
+}
+.btn-primary:active{transform:scale(.98);}
+.btn-primary:disabled{background:#D9DDE1; color:#9AA1A8;}
+.btn-outline{
+  width:100%;
+  min-height:48px;
+  border:1.5px solid var(--line);
+  border-radius:var(--r-sm);
+  background:#fff;
+  color:var(--text);
+  font-size:0.95rem;
+  font-weight:700;
+  cursor:pointer;
+}
+
+/* ---------- Med list rows (check screen) ---------- */
+.med-check-row{
+  display:flex; align-items:center; gap:12px;
+  padding:12px 0;
+  border-bottom:1px solid var(--line);
+}
+.med-check-row:last-child{border-bottom:none;}
+.med-check-icon{
+  width:40px; height:40px; border-radius:12px;
+  background:var(--primary-tint);
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.15rem; flex-shrink:0;
+}
+.med-check-main{flex:1;}
+.med-check-main b{font-size:0.94rem; display:block;}
+.med-check-main span{font-size:0.78rem; color:var(--text-sub);}
+.check-circle{
+  width:26px; height:26px; border-radius:50%;
+  border:2px solid var(--line);
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.85rem; color:#fff; flex-shrink:0;
+}
+.check-circle.on{background:var(--primary); border-color:var(--primary);}
+
+/* ---------- Progress bar ---------- */
+.progress-track{
+  height:9px; border-radius:999px; background:#EEF1F3; overflow:hidden; margin-top:10px;
+}
+.progress-fill{height:100%; background:var(--primary); border-radius:999px;}
+
+/* ---------- Record: day strip ---------- */
+.month-nav{display:flex; align-items:center; justify-content:space-between; margin:6px 4px 10px;}
+.month-nav b{font-size:1.05rem;}
+.month-nav button{
+  width:36px; height:36px; border-radius:50%; border:none; background:#F1F3F5;
+  font-size:1rem; cursor:pointer; color:var(--text);
+}
+.day-strip{display:flex; gap:8px; overflow-x:auto; padding:4px 2px 10px; scrollbar-width:none;}
+.day-strip::-webkit-scrollbar{display:none;}
+.day-cell{
+  flex:0 0 auto;
+  width:48px;
+  border-radius:14px;
+  background:#F6F7F9;
+  text-align:center;
+  padding:8px 0;
+  cursor:pointer;
+  border:2px solid transparent;
+}
+.day-cell .dow{font-size:0.7rem; color:var(--text-sub);}
+.day-cell .num{font-size:0.98rem; font-weight:700; margin-top:2px;}
+.day-cell.selected{border-color:var(--text);}
+.day-cell.full{background:var(--primary-tint);}
+.day-cell.full .num{color:var(--primary-deep);}
+.day-cell.partial{background:#EAF3FB;}
+.day-cell.missed{background:var(--coral-tint);}
+.day-cell.missed .num{color:#C4432F;}
+.day-cell.upcoming{background:#F6F7F9; color:var(--text-faint);}
+
+.day-detail-title{font-size:1rem; font-weight:800; margin:6px 0 10px;}
+.day-summary-row{
+  display:flex; align-items:center; gap:12px;
+  padding:12px 0; border-bottom:1px solid var(--line);
+  cursor:pointer;
+}
+.day-summary-row:last-child{border-bottom:none;}
+.day-summary-row .d{font-size:0.92rem; font-weight:700; min-width:92px;}
+.day-summary-row .ratio{margin-left:auto; font-size:0.85rem; color:var(--text-sub); font-weight:700;}
+
+/* ---------- Segment control ---------- */
+.segment2{
+  display:flex; background:#EEF1F3; border-radius:999px; padding:4px; margin:6px 0 4px;
+}
+.segment2 button{
+  flex:1; border:none; background:none; min-height:42px; border-radius:999px;
+  font-size:0.92rem; color:var(--text-sub); cursor:pointer;
+}
+.segment2 button.active{background:#fff; color:var(--text); font-weight:800; box-shadow:var(--shadow);}
+
+/* ---------- Bottom nav (5 tabs) ---------- */
+.bottom-nav{
+  position:fixed; left:0; right:0; bottom:0;
+  max-width:480px; margin:0 auto;
+  background:#FFFFFF;
+  border-top:1px solid var(--line);
+  display:flex;
+  padding:6px 2px calc(6px + env(safe-area-inset-bottom));
+  z-index:50;
+}
+.nav-btn{
+  flex:1; background:none; border:none; min-height:56px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  color:var(--text-faint); font-size:0.7rem; cursor:pointer;
+}
+.nav-btn .icon{font-size:1.35rem;}
+.nav-btn.active{color:var(--primary); font-weight:800;}
+
+/* ---------- Detail overlay (pushed screens) ---------- */
+.detail-overlay{
+  position:fixed; inset:0;
+  max-width:480px; margin:0 auto;
+  background:var(--bg);
+  z-index:100;
+  display:none;
+  overflow-y:auto;
+}
+.detail-overlay.show{display:block; animation:slideIn .28s ease;}
+.detail-topbar{
+  display:flex; align-items:center; gap:8px;
+  padding:calc(16px + env(safe-area-inset-top)) 10px 10px 4px;
+  background:var(--bg);
+  position:sticky; top:0;
+}
+.detail-topbar .back-btn{
+  width:40px; height:40px; border:none; background:none; font-size:1.3rem; cursor:pointer; color:var(--text);
+  border-radius:50%;
+}
+.detail-topbar .back-btn:active{background:var(--line);}
+.detail-topbar .t{font-size:1.12rem; font-weight:800;}
+.detail-body{padding:4px 18px 60px;}
+
+/* ---------- Menu list rows (mypage) ---------- */
+.menu-row{
+  display:flex; align-items:center; gap:14px;
+  background:var(--card);
+  padding:16px 16px;
+  cursor:pointer;
+}
+.menu-row:first-child{border-radius:var(--r-md) var(--r-md) 0 0;}
+.menu-row:last-child{border-radius:0 0 var(--r-md) var(--r-md);}
+.menu-row + .menu-row{border-top:1px solid var(--line);}
+.menu-row .mi{font-size:1.15rem; width:24px; text-align:center;}
+.menu-row .mt{flex:1; font-size:0.96rem; font-weight:600;}
+.menu-row .chev{color:var(--text-faint);}
+.menu-group{background:var(--card); border-radius:var(--r-md); box-shadow:var(--shadow); overflow:hidden; margin:14px 0;}
+
+.profile-card{display:flex; align-items:center; gap:14px;}
+.profile-avatar{
+  width:56px; height:56px; border-radius:50%;
+  background:var(--primary-tint);
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.7rem; flex-shrink:0;
+}
+.profile-main{flex:1;}
+.profile-main b{font-size:1.05rem; display:block;}
+.profile-main .link{font-size:0.82rem; color:var(--text-sub); margin-top:2px;}
+
+/* ---------- Forms (detail screens) ---------- */
+.field{margin-bottom:14px;}
+.field label{display:block; font-size:0.86rem; color:var(--text-sub); margin-bottom:6px; font-weight:600;}
+.field input[type="text"], .field input[type="date"], .field input[type="number"], .field input[type="time"]{
+  width:100%; min-height:48px;
+  border:1.5px solid var(--line); border-radius:var(--r-sm);
+  padding:0 14px; font-size:0.98rem; color:var(--text); background:#fff;
+}
+.toggle-row{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px; min-height:56px;
+}
+.toggle-row span{font-size:0.94rem; font-weight:600;}
+.switch{position:relative; width:48px; height:28px; flex-shrink:0;}
+.switch input{opacity:0; width:100%; height:100%; margin:0; position:absolute; z-index:2; cursor:pointer;}
+.switch .track{position:absolute; inset:0; background:#DDE2E6; border-radius:999px; transition:background .2s;}
+.switch .thumb{position:absolute; top:3px; left:3px; width:22px; height:22px; background:#fff; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .2s;}
+.switch input:checked + .track{background:var(--primary);}
+.switch input:checked + .track + .thumb{transform:translateX(20px);}
+
+.tag-row{display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;}
+.tag-check{
+  border:1.5px solid var(--line); border-radius:999px; padding:8px 14px;
+  font-size:0.86rem; cursor:pointer; min-height:40px; display:flex; align-items:center; color:var(--text-sub);
+}
+.tag-check.checked{background:var(--primary-tint); border-color:var(--primary); color:var(--primary-deep); font-weight:700;}
+.tag-check input{display:none;}
+
+.med-manage-row{display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--line);}
+.med-manage-row:last-of-type{border-bottom:none;}
+.med-manage-main{flex:1;}
+.med-manage-main b{font-size:0.94rem; display:block;}
+.med-manage-main span{font-size:0.78rem; color:var(--text-sub); display:block; margin-top:2px; line-height:1.4;}
+.med-manage-main .remain{font-size:0.8rem; font-weight:700; margin-top:2px;}
+.med-manage-main .remain.warn{color:var(--coral);}
+.remove-btn{
+  width:38px; height:38px; border-radius:50%; border:none; background:var(--coral-tint); color:var(--coral);
+  font-size:1rem; cursor:pointer; flex-shrink:0;
+}
+
+.font-seg{display:flex; gap:8px; margin-top:6px;}
+.font-seg button{
+  flex:1; min-height:46px; border-radius:var(--r-sm); border:1.5px solid var(--line); background:#fff;
+  color:var(--text); font-size:0.9rem; cursor:pointer;
+}
+.font-seg button.active{background:var(--primary); border-color:var(--primary); color:#fff; font-weight:800;}
+
+.hint-text{color:var(--text-sub); font-size:0.85rem; line-height:1.5; margin-top:8px;}
+
+/* ---------- Side drawer (hamburger) ---------- */
+.drawer-backdrop{
+  position:fixed; inset:0; background:rgba(20,25,30,0.35);
+  z-index:150; display:none;
+}
+.drawer-backdrop.show{display:block; animation:fadeIn .2s ease;}
+.drawer{
+  position:fixed; top:0; left:0; bottom:0; width:76%; max-width:320px;
+  background:#fff; z-index:151;
+  padding:calc(24px + env(safe-area-inset-top)) 20px 20px;
+  transform:translateX(-100%);
+  transition:transform .25s ease;
+}
+.drawer.show{transform:translateX(0);}
+.drawer .dh{font-size:1.1rem; font-weight:800; margin-bottom:18px;}
+.drawer .dlink{
+  display:flex; align-items:center; gap:12px;
+  padding:14px 4px; font-size:0.98rem; font-weight:600; cursor:pointer;
+  border-radius:12px;
+}
+.drawer .dlink:active{background:var(--line);}
+
+/* ---------- Toast ---------- */
+.toast{
+  position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(10px);
+  background:#23272B; color:#fff; padding:12px 20px; border-radius:999px;
+  font-size:0.9rem; max-width:88%; text-align:center;
+  opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease; z-index:999;
+}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+/* ---------- Notification overlay list ---------- */
+.notif-row{padding:14px 0; border-bottom:1px solid var(--line);}
+.notif-row:last-child{border-bottom:none;}
+.notif-row b{font-size:0.92rem; display:block;}
+.notif-row span{font-size:0.78rem; color:var(--text-sub);}
+
+.foot-space{height:10px;}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ HOME ============ -->
+  <div class="tab-view active" id="tab-home">
+    <div class="home-topbar">
+      <button class="icon-btn" id="menu-btn" aria-label="메뉴">☰</button>
+      <span class="brand-word">오늘, 해냈어요</span>
+      <button class="icon-btn" id="bell-btn" aria-label="알림">🔔<span class="badge-dot" id="bell-dot"></span></button>
+    </div>
+    <div class="greeting-block">
+      <p class="hello" id="home-hello"></p>
+      <p class="name-line" id="home-name"></p>
+      <p class="sub-line">오늘도 건강한 하루 보내세요!</p>
+    </div>
+    <div class="tab-content" style="padding-top:0;">
+      <div class="status-pill-card" id="status-pill"></div>
+
+      <div class="card" id="home-arc-card"></div>
+
+      <div class="card pad-md encourage-card">
+        <div class="encourage-icon">🌿</div>
+        <div class="encourage-text">
+          <b id="encourage-title">오늘도 잘하고 계세요!</b>
+          <span>작은 꾸준함이 건강을 만듭니다 :)</span>
+        </div>
+      </div>
+
+      <div class="hscroll" id="home-stats"></div>
+
+      <div class="section-head">
+        <h2>오늘의 맞춤 건강 정보</h2>
+        <span class="more" id="home-more-health">더보기 ›</span>
+      </div>
+      <div id="home-health-card"></div>
+    </div>
+  </div>
+
+  <!-- ============ 복약체크 ============ -->
+  <div class="tab-view" id="tab-check">
+    <div class="root-topbar"><span class="root-title">복약체크</span></div>
+    <div class="tab-content">
+      <div class="card pad-sm" style="display:flex; align-items:center; justify-content:space-between;">
+        <b id="check-date-label" style="font-size:0.98rem;"></b>
+        <span>📅</span>
+      </div>
+      <div class="slot-chip-row" id="check-slot-row"></div>
+      <div class="card" id="check-detail-card"></div>
+      <div class="section-head"><h2>오늘의 복약 목록</h2></div>
+      <div class="card pad-md" id="check-med-list"></div>
+      <button class="btn-primary" id="check-confirm-btn"></button>
+      <div id="check-encourage-slot"></div>
+    </div>
+  </div>
+
+  <!-- ============ 기록 ============ -->
+  <div class="tab-view" id="tab-record">
+    <div class="root-topbar"><span class="root-title">기록</span></div>
+    <div class="tab-content">
+      <div class="segment2">
+        <button id="rec-seg-schedule" class="active">일정</button>
+        <button id="rec-seg-log">기록</button>
+      </div>
+      <div id="record-body"></div>
+    </div>
+  </div>
+
+  <!-- ============ 건강정보 ============ -->
+  <div class="tab-view" id="tab-health">
+    <div class="root-topbar"><span class="root-title">건강 정보</span></div>
+    <div class="tab-content">
+      <div class="chip-filter-row" id="health-filter-row"></div>
+      <div id="health-hero"></div>
+      <div id="health-cards"></div>
+      <div class="section-head"><h2>추천 콘텐츠</h2><span class="more" id="health-more">더보기 ›</span></div>
+      <div id="health-recommend"></div>
+    </div>
+  </div>
+
+  <!-- ============ 마이페이지 ============ -->
+  <div class="tab-view" id="tab-mypage">
+    <div class="root-topbar">
+      <span class="root-title">마이페이지</span>
+      <button class="icon-btn" id="mypage-gear-btn" aria-label="앱 정보">⚙️</button>
+    </div>
+    <div class="tab-content">
+      <div class="card tap profile-card" id="profile-card-btn"></div>
+      <div class="card pad-md" id="mypage-status-card"></div>
+      <div class="menu-group" id="mypage-menu"></div>
+      <div class="menu-group" style="margin-top:14px;">
+        <div class="menu-row" id="mypage-reset-row">
+          <span class="mi">🗑️</span><span class="mt" style="color:var(--coral);">전체 데이터 삭제</span><span class="chev">›</span>
+        </div>
+      </div>
+      <div class="card pad-md" style="display:flex; align-items:center; gap:12px;">
+        <span style="font-size:1.4rem;">💚</span>
+        <span style="font-size:0.88rem; color:var(--text-sub);">늘 건강하시길 바랍니다. 저희가 함께하겠습니다.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="home"><span class="icon">🏠</span>홈</button>
+    <button class="nav-btn" data-tab="check"><span class="icon">✅</span>복약체크</button>
+    <button class="nav-btn" data-tab="record"><span class="icon">🗂️</span>기록</button>
+    <button class="nav-btn" data-tab="health"><span class="icon">💚</span>건강정보</button>
+    <button class="nav-btn" data-tab="mypage"><span class="icon">👤</span>마이페이지</button>
+  </nav>
+
+  <!-- ============ DETAIL OVERLAY ============ -->
+  <div class="detail-overlay" id="detail-overlay">
+    <div class="detail-topbar">
+      <button class="back-btn" id="detail-back-btn">‹</button>
+      <span class="t" id="detail-title"></span>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  </div>
+
+  <!-- ============ DRAWER ============ -->
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <div class="drawer" id="drawer">
+    <div class="dh">오늘, 해냈어요</div>
+    <div class="dlink" data-tab="home">🏠 홈</div>
+    <div class="dlink" data-tab="check">✅ 복약체크</div>
+    <div class="dlink" data-tab="record">🗂️ 기록</div>
+    <div class="dlink" data-tab="health">💚 건강 정보</div>
+    <div class="dlink" data-tab="mypage">👤 마이페이지</div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="./app.js"></script>
+</body>
+</html>
