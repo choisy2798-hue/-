@@ -699,7 +699,6 @@ function renderHome(){
       <div class="arc-card-head">
         <div>
           <p class="arc-card-title">오늘의 복약 현황</p>
-          <p class="arc-card-num">${doneCount}<span>/${slots.length}회 완료</span></p>
           <p class="arc-card-sub">${nextSlot? `다음 복약 시간: ${state.times[slotIndex(nextSlot)]}` : '오늘 복약을 모두 마쳤어요'}</p>
         </div>
       </div>
@@ -848,7 +847,7 @@ function renderCheck(){
   const i=slotIndex(slot);
   const status=slotStatusToday(slot);
   const badge = status==='taken' ? `<span class="status-badge done">복약 완료</span>`
-    : status==='missed' ? `<span class="status-badge warn">미복약</span>`
+    : (status==='missed' || isAwaitingDecision(slot)) ? `<span class="status-badge warn">미복약${medCheckedCount(slot.key)>0?` · ${medCheckedCount(slot.key)}/${slotMeds(slot.key).length} 복용`:''}</span>`
     : (medCheckedCount(slot.key)>0 ? `<span class="status-badge pending">${medCheckedCount(slot.key)}/${slotMeds(slot.key).length} 복용</span>` : `<span class="status-badge pending">복약 전</span>`);
 
   document.getElementById('check-detail-card').innerHTML=`
@@ -886,12 +885,22 @@ function renderCheck(){
   const btn=document.getElementById('check-confirm-btn');
   const threeWayEl=document.getElementById('check-three-way');
 
+  // 같은 로직을 아침·점심·저녁·취침전 모두에 적용: 약별 선택 + "선택한 약 N개 복용 완료" 버튼은 항상 표시하고,
+  // 복용 예정 시간이 지난 직후(2시간 안)에는 그 위에 복용함/건너뜀/나중에 선택지를 추가로 보여준다.
+  btn.style.display='';
+  btn.className='btn-primary';
+  if(status==='taken'){ btn.className='btn-outline'; btn.textContent='복용 완료 취소'; btn.disabled=false; btn.style.background=''; btn.onclick=()=>cancelSlotToday(slot.key); }
+  else {
+    const n=draftIds.length;
+    btn.textContent = n===0 ? '먹은 약을 체크해 주세요' : `선택한 약 ${n}개 복용 완료`;
+    btn.disabled = n===0;
+    btn.style.background='';
+    btn.onclick=()=>commitSelectedMeds(slot.key);
+  }
   if(isAwaitingDecision(slot)){
-    // 복용 예정 시간이 지났고 아직 결정이 없는 상태(2시간 안) - 3가지 선택지 제공
-    btn.style.display='none';
     threeWayEl.style.display='';
     threeWayEl.innerHTML=`
-      <p class="hint-text" style="margin:0 0 10px; text-align:center;">${slot.label} 약, 어떻게 하셨나요?${meds.length>1?'<br>일부만 드셨다면 먹은 약만 눌러 체크하고 "복용함"을 눌러 주세요.':''}</p>
+      <p class="hint-text" style="margin:0 0 10px; text-align:center;">${slot.label} 약, 어떻게 하셨나요?</p>
       <div style="display:flex; gap:8px;">
         <button class="btn-primary" id="three-taken" style="flex:1;">복용함</button>
         <button class="btn-outline" id="three-skip" style="flex:1;">건너뜀</button>
@@ -903,17 +912,6 @@ function renderCheck(){
   } else {
     threeWayEl.style.display='none';
     threeWayEl.innerHTML='';
-    btn.style.display='';
-    btn.className='btn-primary';
-    if(status==='taken'){ btn.className='btn-outline'; btn.textContent='복용 완료 취소'; btn.disabled=false; btn.style.background=''; btn.onclick=()=>cancelSlotToday(slot.key); }
-    else if(!editable){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
-    else {
-      const n=draftIds.length;
-      btn.textContent = n===0 ? '먹은 약을 체크해 주세요' : `선택한 약 ${n}개 복용 완료`;
-      btn.disabled = n===0;
-      btn.style.background='';
-    }
-    if(status!=='taken') btn.onclick=()=>commitSelectedMeds(slot.key);
   }
 
   document.getElementById('check-encourage-slot').innerHTML = status==='taken' ? `
