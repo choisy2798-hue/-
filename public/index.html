@@ -628,6 +628,29 @@ button, input{font-family:inherit;}
 .plant-done{background:var(--primary-tint); color:var(--primary-deep); border-radius:12px; padding:10px; font-weight:800; font-size:1.05rem; margin-top:8px;}
 .reason-opt{display:block; width:100%; text-align:left; min-height:56px; padding:12px 16px; margin:8px 0; border-radius:14px; border:1.5px solid var(--line); background:#fff; font-size:1.05rem; font-weight:700; cursor:pointer; color:var(--text);}
 .reason-opt.on{border-color:var(--primary); background:var(--primary-tint); color:var(--primary-deep);}
+
+/* ---------- v9: 홈 → 복약 상세, 일간·주간·월간·연간 전환 ---------- */
+.detail-overlay.keep-nav{bottom:calc(68px + env(safe-area-inset-bottom));}
+.period-tabs{display:flex; gap:2px; background:#E6E9ED; border-radius:12px; padding:3px; margin:6px 0 12px;}
+.period-tabs button{flex:1; min-height:44px; border:none; background:transparent; border-radius:10px; font-size:1rem; font-weight:700; color:var(--text-sub); cursor:pointer;}
+.period-tabs button.active{background:#fff; color:var(--text); font-weight:800; box-shadow:var(--shadow);}
+.stat-range{display:flex; align-items:center; gap:8px; margin:2px 0 4px;}
+.stat-range .lbl{flex:1; text-align:center; font-size:1.05rem; font-weight:800;}
+.stat-range button{min-width:44px; min-height:44px; border:1.5px solid var(--line); background:#fff; border-radius:12px; font-size:1.2rem; cursor:pointer;}
+.stat-hero{text-align:center;}
+.stat-hero .ring-wrap{width:100%; max-width:200px; margin:0 auto;}
+.stat-hero .big{font-size:1.5rem; font-weight:800; margin:6px 0 2px;}
+.stat-hero .small{font-size:1rem; color:var(--text-sub); margin:0;}
+.stat-row{display:flex; align-items:center; gap:10px; padding:13px 0; border-bottom:1px solid var(--line); cursor:pointer;}
+.stat-row:last-child{border-bottom:none;}
+.stat-row .d{min-width:84px; font-size:1rem; font-weight:700;}
+.stat-row .bar{flex:1; height:10px; border-radius:6px; background:#E6E9ED; overflow:hidden;}
+.stat-row .bar i{display:block; height:100%; background:var(--primary);}
+.stat-row .v{min-width:70px; text-align:right; font-size:0.95rem; font-weight:700; color:var(--text-sub);}
+.sdots{display:flex; gap:5px; flex:1;}
+.sdots i{width:14px; height:14px; border-radius:50%; background:#DDE2E6; display:inline-block;}
+.sdots i.t{background:var(--primary);} .sdots i.m{background:var(--coral);}
+.home-ring-wrap{width:100%; max-width:190px; margin:6px auto 0;}
 </style>
 </head>
 <body>
@@ -641,6 +664,7 @@ button, input{font-family:inherit;}
       <button class="icon-btn" id="bell-btn" aria-label="알림">🔔<span class="badge-dot" id="bell-dot"></span></button>
     </div>
     <div class="greeting-block">
+      <p class="sub-line" id="home-date" style="font-weight:700; color:var(--primary-deep); margin-bottom:2px;"></p>
       <p class="hello" id="home-hello"></p>
       <p class="name-line" id="home-name"></p>
       <p class="sub-line">오늘도 건강한 하루 보내세요!</p>

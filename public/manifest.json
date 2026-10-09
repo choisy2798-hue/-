@@ -1,6 +1,6 @@
 {
-  "name": "오늘, 해냈어요 - 복약 알리미",
-  "short_name": "오늘, 해냈어요",
+  "name": "복약 알리미",
+  "short_name": "복약 알리미",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -22,10 +22,11 @@
       "purpose": "any"
     },
     {
-      "src": "icon-512.png",
+      "src": "icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "id": "./index.html"
 }
