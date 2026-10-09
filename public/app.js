@@ -1720,7 +1720,14 @@ function deleteSideEffect(id){
 }
 function markManualSeen(){ if(!state.manualSeen){ state.manualSeen=true; saveState(); } }
 function maybeShowFirstRun(){
-  if(state.manualSeen) return;
+  /* QR 코드로 들어오면(주소 뒤 ?guide=1) 예전에 안내를 봤더라도 첫 화면에 앱 안내를 다시 보여준다 */
+  let forceGuide=false;
+  try{
+    const q=new URLSearchParams(location.search);
+    forceGuide = q.get('guide')==='1';
+    if(forceGuide && window.history && history.replaceState){ history.replaceState(null,'',location.pathname+location.hash); }
+  }catch(e){}
+  if(state.manualSeen && !forceGuide) return;
   const sh=document.getElementById('firstrun-sheet');
   sh.classList.add('show');
   document.getElementById('firstrun-open').onclick=()=>{ sh.classList.remove('show'); markManualSeen(); openDetail('manual'); };

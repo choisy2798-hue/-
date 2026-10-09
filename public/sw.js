@@ -1,4 +1,4 @@
-const CACHE_NAME = 'onul-haenaesseoyo-v23';
+const CACHE_NAME = 'onul-haenaesseoyo-v24';
 const APP_SHELL = [
   './index.html',
   './app.js',
