@@ -1,7 +1,6 @@
-const CACHE_NAME = 'onul-haenaesseoyo-v22';
+const CACHE_NAME = 'onul-haenaesseoyo-v21';
 const APP_SHELL = [
   './index.html',
-  './app.js',
   './manifest.json',
   './icon-192.png?v=2',
   './icon-512.png?v=2',
@@ -30,22 +29,6 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.url.includes('/api/')) return; // API 요청은 캐시하지 않음
-  /* 앱 본체(html/js/json)는 항상 네트워크 우선 → 새 배포가 바로 반영되고, 오프라인일 때만 저장본을 쓴다.
-     (예전 app.js와 새 index.html이 섞여 기능이 안 움직이는 문제 방지) */
-  const reqUrl = new URL(event.request.url);
-  if (reqUrl.origin === self.location.origin &&
-      (event.request.mode === 'navigate' || /\.(js|html|json)$/.test(reqUrl.pathname) || reqUrl.pathname.endsWith('/'))) {
-    event.respondWith(
-      fetch(event.request, { cache: 'no-cache' })
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return response;
-        })
-        .catch(() => caches.match(event.request).then((c) => c || caches.match('./index.html')))
-    );
-    return;
-  }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
