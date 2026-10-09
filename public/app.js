@@ -157,6 +157,7 @@ const state={
   repeatCounts:{},
   medIdSeq:1,
   notifLog:[],
+  medChecks:{},            // { "YYYY-MM-DD": { slotKey: { medId:true } } } - 약별 개별 복용 체크 (기존 기록 구조와 별도)
   sideEffects:[],          // [{id,date,slot,symptom,other,createdAt}] - 약 먹고 불편한 점 기록 (별도 저장)
   manualSeen:false,        // 사용 방법 안내를 이미 보여줬는지
 };
@@ -250,6 +251,13 @@ function currentDaySnapshot(){
   return rec;
 }
 
+/* 오래된(120일 이전) 약별 체크는 정리해서 저장 용량을 아낀다 */
+function pruneMedChecks(){
+  const cut=new Date(nowDate()); cut.setDate(cut.getDate()-120);
+  const cutKey=dateKey(cut);
+  Object.keys(state.medChecks).forEach(k=>{ if(k<cutKey) delete state.medChecks[k]; });
+  return state.medChecks;
+}
 function buildAppData(){
   state.medicationRecords[dateKey(nowDate())]=currentDaySnapshot();
   return {
@@ -270,6 +278,7 @@ function buildAppData(){
     },
     reasons:state.slotReasons,
     consultRequested:state.consultRequested,
+    medChecks:pruneMedChecks(),
     sideEffects:state.sideEffects,
     manualSeen:state.manualSeen,
     meta:{
@@ -357,6 +366,7 @@ function loadState(){
 
     if(d.reasons && typeof d.reasons==='object') state.slotReasons=d.reasons;
     if(typeof d.consultRequested==='boolean') state.consultRequested=d.consultRequested;
+    if(d.medChecks && typeof d.medChecks==='object') state.medChecks=d.medChecks;
     if(Array.isArray(d.sideEffects)) state.sideEffects=d.sideEffects.filter(x=>x && typeof x==='object' && x.date);
     if(typeof d.manualSeen==='boolean') state.manualSeen=d.manualSeen;
 
@@ -438,6 +448,7 @@ function resetAllData(){
   state.medIdSeq=1;
   state.notifLog=[];
   state.sideEffects=[];
+  state.medChecks={};
   state.manualSeen=true; // 삭제 직후 첫 실행 안내가 다시 뜨지 않게
 
   checkSelectedSlot=null;
@@ -625,7 +636,7 @@ function renderHome(){
   const md=`${nowDate().getMonth()+1}월 ${nowDate().getDate()}일`;
   const yak=(l)=>/약$/.test(l)?l:l+' 약';
   if(slots.length===0){
-    pill.innerHTML=pillInnerHTML('💊',`${md} · 등록된 약이 없어요. 먼저 약을 등록해볼까요?`,'복약 정보 관리로 이동하기 →');
+    pill.innerHTML=pillInnerHTML('💊',`${md} · 등록된 약이 없어요. 먼저 약을 등록해볼까요?`,'복약 관리로 이동하기 →');
     pill.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
   } else if(missed){
     pill.innerHTML=pillInnerHTML('🌷',`${md} ${yak(missed.label)}을 아직 못 챙기셨어요`,'복약 체크 화면으로 이동하기 →');
@@ -803,7 +814,7 @@ function renderCheck(){
   const status=slotStatusToday(slot);
   const badge = status==='taken' ? `<span class="status-badge done">복약 완료</span>`
     : status==='missed' ? `<span class="status-badge warn">미복약</span>`
-    : `<span class="status-badge pending">복약 전</span>`;
+    : (medCheckedCount(slot.key)>0 ? `<span class="status-badge pending">${medCheckedCount(slot.key)}/${slotMeds(slot.key).length} 복용</span>` : `<span class="status-badge pending">복약 전</span>`);
 
   document.getElementById('check-detail-card').innerHTML=`
     <div style="display:flex; align-items:center; gap:12px;">
@@ -815,14 +826,20 @@ function renderCheck(){
       ${badge}
     </div>`;
 
-  const meds=state.medications.filter(m=>m.slots.includes(slot.key));
+  const meds=slotMeds(slot.key);
   const check=status==='taken';
-  document.getElementById('check-med-list').innerHTML = meds.length ? meds.map(m=>`
-    <div class="med-check-row">
+  const locked = status!=='pending';
+  document.getElementById('check-med-list').innerHTML = meds.length ? `
+    ${(!check && !locked && meds.length>1) ? `<p class="hint-text" style="margin:0 0 6px;">먹은 약을 하나씩 눌러 체크하세요. (${medCheckedCount(slot.key)}/${meds.length})</p>` : ''}` + meds.map(m=>{
+      const on=medCheckedToday(slot.key,m.id);
+      return `<div class="med-check-row" data-med-row="${m.id}" style="${locked?'':'cursor:pointer;'} min-height:64px;">
       <div class="med-check-icon">💊</div>
-      <div class="med-check-main"><b>${m.name} ${m.dose||''}</b><span>${slot.intent}</span></div>
-      <div class="check-circle ${check?'on':''}">${check?'✓':''}</div>
-    </div>`).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 설정 > 복약 정보 관리에서 약을 등록해보세요.</div>`;
+      <div class="med-check-main"><b>${escapeHtml(m.name)} ${m.dose||''}</b><span>${slot.intent}</span></div>
+      <div class="check-circle ${on?'on':''}" style="width:40px;height:40px;">${on?'✓':''}</div>
+    </div>`;}).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 설정 > 복약 관리에서 약을 등록해보세요.</div>`;
+  document.querySelectorAll('#check-med-list [data-med-row]').forEach(row=>{
+    row.addEventListener('click', ()=>{ if(!locked) toggleMedCheck(slot.key, row.getAttribute('data-med-row')); });
+  });
 
   const btn=document.getElementById('check-confirm-btn');
   const threeWayEl=document.getElementById('check-three-way');
@@ -847,7 +864,7 @@ function renderCheck(){
     btn.style.display='';
     if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
     else if(status==='missed'){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
-    else { btn.textContent='확인 완료'; btn.disabled=false; btn.style.background=''; }
+    else { btn.textContent = slotMeds(slot.key).length>1 ? '남은 약 모두 먹었어요' : '확인 완료'; btn.disabled=false; btn.style.background=''; }
     btn.onclick=()=>toggleSlot(slot.key);
   }
 
@@ -869,11 +886,38 @@ function slotChipRowInnerForCheck(slots){
     </div>`;
   }).join('');
 }
+/* ---- 약별 개별 체크 ---- */
+function slotMeds(slotKey){ return state.medications.filter(m=>Array.isArray(m.slots)&&m.slots.includes(slotKey)); }
+function medCheckedToday(slotKey, medId){
+  const slot=state.slots.find(s=>s.key===slotKey);
+  if(slot && slot.taken) return true; // 시간대 전체가 완료면 모든 약 완료
+  const t=state.medChecks[dateKey(nowDate())];
+  return !!(t && t[slotKey] && t[slotKey][medId]);
+}
+function medCheckedCount(slotKey){ return slotMeds(slotKey).filter(m=>medCheckedToday(slotKey,m.id)).length; }
+function setMedChecked(slotKey, medId, on){
+  const k=dateKey(nowDate());
+  if(!state.medChecks[k]) state.medChecks[k]={};
+  if(!state.medChecks[k][slotKey]) state.medChecks[k][slotKey]={};
+  if(on) state.medChecks[k][slotKey][medId]=true; else delete state.medChecks[k][slotKey][medId];
+}
+/* 약 하나만 체크/해제. 그 시간대의 약을 전부 체크하면 그때 시간대가 "복약 완료"가 된다. */
+function toggleMedCheck(slotKey, medId){
+  const slot=state.slots.find(s=>s.key===slotKey);
+  if(!slot || slot.taken || slotStatusToday(slot)==='missed') return;
+  const was=medCheckedToday(slotKey, medId);
+  setMedChecked(slotKey, medId, !was);
+  const meds=slotMeds(slotKey);
+  if(meds.length && meds.every(m=>medCheckedToday(slotKey,m.id))){ toggleSlot(slotKey); return; }
+  saveState();
+  renderAll();
+}
 function toggleSlot(key){
   const slot=state.slots.find(s=>s.key===key);
   if(!slot||slot.taken) return;
   slot.taken=true;
   slot.skipped=false;
+  slotMeds(key).forEach(m=>setMedChecked(key,m.id,true)); // "복용함/확인 완료"는 이 시간대 약 전체 체크
   delete snoozeUntilMin[key];
   closeReminderNotification(key);
   toast(CHEER_TOASTS[Math.floor(Math.random()*CHEER_TOASTS.length)]);
@@ -916,8 +960,6 @@ function renderRecord(){
   document.getElementById('rec-seg-log').classList.toggle('active', recordSubview==='log');
   document.getElementById('record-body').innerHTML = recordSubview==='schedule' ? recordScheduleHTML() : recordLogHTML();
   if(recordSubview==='log') bindRecordLogEvents();
-  const alertLink=document.getElementById('record-alert-link');
-  if(alertLink) alertLink.onclick=()=>openDetail('alert');
 }
 function recordScheduleHTML(){
   const slots=activeSlots();
@@ -941,20 +983,6 @@ function recordScheduleHTML(){
       <p class="arc-card-title">이번 주 복약 현황</p>
       <p class="arc-card-num">${hist.length ? `${hist.length}일 중 ${doneDays}일 완료` : '아직 기록이 없어요'} <span style="float:right;">${rate}%</span></p>
       <div class="progress-track"><div class="progress-fill" style="width:${rate}%;"></div></div>
-    </div>
-    <div class="row-card" id="record-alert-link">
-      <div class="row-thumb" style="background:var(--primary-tint);">🔔</div>
-      <div class="row-main"><b>복약 알림 설정</b><span>알림 시간과 반복 알림을 관리해요</span></div>
-      <span class="chev" style="color:var(--text-faint);">›</span>
-    </div>
-    <div class="tip-illust-card card" style="padding:0;">
-      <div class="tip-illust-body" style="display:flex; gap:12px; align-items:flex-start; padding:16px;">
-        <span style="font-size:1.6rem;">💡</span>
-        <div>
-          <b>복약 시간 안내</b>
-          <span>정해진 시간에 복약하는 것이 약의 효과를 높여줍니다.</span>
-        </div>
-      </div>
     </div>`;
 }
 /* 실제 요일 격자에 맞춘 월간 달력 (일~토 순서, 다른 달 날짜는 빈 칸으로만 패딩) */
@@ -991,27 +1019,13 @@ function recordLogHTML(){
     const st=selStatuses[s.key];
     const label = st==='taken' ? '완료' : st==='missed' ? '미복약' : (isFutureSel ? '예정' : (isTodaySel ? '복약 전' : '기록 없음'));
     const cls = st==='taken' ? 'done' : st==='missed' ? 'warn' : 'pending';
-    return `<div class="med-check-row">
+    return `<div class="med-check-row" style="flex-wrap:wrap;">
       <div class="med-check-icon">${s.icon}</div>
       <div class="med-check-main"><b>${s.label}</b><span>${state.times[slotIndex(s)]}</span></div>
       <span class="status-badge ${cls}">${label}</span>
+      ${perMedRowsHTML(s, selectedKeyStr, st, isFutureSel)}
     </div>`;
   }).join('') : `<div class="hint-text" style="margin:0;">이 날짜에는 표시할 복약 기록이 없어요.</div>`;
-
-  let recentRows='';
-  if(slots.length===0){
-    recentRows=`<div class="hint-text" style="margin:0;">등록된 약이 없어요.</div>`;
-  } else {
-    for(let i=0;i<7;i++){
-      const d=new Date(); d.setDate(d.getDate()-i);
-      const st=daySlotStatuses(d);
-      const doneCnt=Object.values(st).filter(v=>v==='taken').length;
-      recentRows+=`<div class="day-summary-row" data-date="${dateKey(d)}">
-        <span class="d">${d.getMonth()+1}월 ${d.getDate()}일 (${DOW[d.getDay()]})</span>
-        <span class="ratio">${doneCnt}/${slots.length} 완료</span>
-      </div>`;
-    }
-  }
 
   return `
     <div class="chip-filter-row">${chips}</div>
@@ -1033,9 +1047,21 @@ function recordLogHTML(){
       ${slotRows}
       ${sideEffectDayHTML(selectedKeyStr)}
     </div>
-    <div class="section-head"><h2>최근 기록</h2></div>
-    <div class="card pad-md">${recentRows}</div>
   `;
+}
+/* 날짜 상세에서 시간대 아래에 약별 복용 상태를 보여준다 (약이 2개 이상이거나 일부만 체크된 경우) */
+function perMedRowsHTML(slot, key, slotSt, isFuture){
+  if(isFuture) return '';
+  const meds=slotMeds(slot.key);
+  if(!meds.length) return '';
+  const checks=(state.medChecks[key]||{})[slot.key]||{};
+  const anyChecked=Object.keys(checks).length>0;
+  if(meds.length<2 && !anyChecked) return '';
+  return `<div style="width:100%; padding:2px 0 4px 58px; font-size:0.92rem;">`+meds.map(m=>{
+    const done = slotSt==='taken' || !!checks[m.id];
+    const lbl = done ? '✓ 복용' : (slotSt==='missed' ? '미복용' : '복약 전');
+    return `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>💊 ${escapeHtml(m.name)}</span><b style="color:${done?'var(--primary-deep)':(slotSt==='missed'?'#C4432F':'var(--text-sub)')};">${lbl}</b></div>`;
+  }).join('')+`</div>`;
 }
 function legendHTML(){
   return `<div class="legend">
@@ -1128,14 +1154,28 @@ function renderHealth(){
   }
   document.getElementById('health-cards').innerHTML = html;
 
-  document.getElementById('health-recommend').innerHTML = `
-    <div class="row-card">
-      <div class="row-thumb" style="background:var(--amber-tint);">📚</div>
-      <div class="row-main"><b>복약 순응도를 높이는 5가지 습관</b><span>작은 습관이 큰 변화를 만들어요.</span></div>
-    </div>`;
-  document.getElementById('health-more').onclick=()=>toast('추천 콘텐츠를 준비 중이에요.');
+  const showHabits = healthFilter==='전체' || healthFilter==='건강팁';
+  document.getElementById('health-recommend-head').style.display = showHabits ? '' : 'none';
+  document.getElementById('health-recommend').innerHTML = showHabits ? habitsCardHTML() : '';
 
   bindHealthCardEvents(info);
+}
+/* 복약 순응도 높이는 5가지 습관 */
+function habitsCardHTML(){
+  const habits=[
+    {e:'⏰',t:'매일 정해진 시간에 드세요',d:'밥 먹는 시간처럼 매일 같은 때에 드시면 잊지 않아요.'},
+    {e:'📱',t:'알림을 켜두세요',d:'휴대전화 알림이나 복약 알림 앱이 시간을 알려드려요.'},
+    {e:'✅',t:'먹었는지 기록하고 확인하세요',d:'먹고 나서 바로 체크하면 먹었는지 헷갈리지 않아요.'},
+    {e:'🏠',t:'약은 정해진 방법대로 보관하세요',d:'약 설명서대로 보관하세요. 햇빛과 습기를 피해 서늘한 곳에 두면 좋아요.'},
+    {e:'👩‍⚕️',t:'힘들거나 불편하면 상담하세요',d:'약 먹기가 어렵거나 부작용이 있으면 혼자 끊지 말고 의사·약사님께 물어보세요.'},
+  ];
+  return `<div class="card pad-md" id="habits-card">
+    <p class="hint-text" style="margin:0 0 8px; font-size:1rem; line-height:1.6;"><b>복약 순응도</b>란, 처방받은 약을 정해진 시간과 방법에 맞게 꾸준히 드시는 것이에요.</p>
+    ${habits.map((h,i)=>`<div style="display:flex; gap:12px; align-items:flex-start; padding:14px 0; border-top:1px solid var(--line);">
+      <div style="font-size:1.8rem; line-height:1;">${h.e}</div>
+      <div style="flex:1; min-width:0;"><b style="display:block; font-size:1.08rem; margin-bottom:4px;">${i+1}. ${h.t}</b><span style="font-size:1rem; line-height:1.55; color:var(--text-sub);">${h.d}</span></div>
+    </div>`).join('')}
+  </div>`;
 }
 function patternCardHTML(info){
   const label=slotLabelByKey(info.key);
@@ -1221,7 +1261,7 @@ let sideEffectDraft={symptom:null, slot:null};
 const MANUAL_CARDS=[
   {icon:'💊',title:'약 등록하기',desc:'홈 아래 "약·알람 등록하기"를 눌러 약 이름과 먹는 시간을 골라 주세요.'},
   {icon:'✅',title:'약 먹었다고 체크하기',desc:'복약체크에서 "복용함", "건너뜀", "나중에" 중 하나를 눌러 주세요.'},
-  {icon:'🔔',title:'알림 받기',desc:'설정 > 복약 알림 설정에서 푸시 알림을 켜고, 브라우저 메뉴에서 "홈 화면에 추가"를 해 주세요.'},
+  {icon:'🔔',title:'알림 받기',desc:'설정 > 복약 관리에서 푸시 알림을 켜고, 브라우저 메뉴에서 "홈 화면에 추가"를 해 주세요.'},
   {icon:'🗂️',title:'기록 보기',desc:'아래 "기록"에서 달력의 날짜를 누르면 그날 약을 드셨는지 볼 수 있어요.'},
   {icon:'😣',title:'불편한 점 기록하기',desc:'약 먹고 어지러우면 홈의 "불편한 점" 버튼을 눌러 증상을 골라 남기세요.'},
   {icon:'🔤',title:'글자 크기 키우기',desc:'설정 > 글자 크기 설정에서 "크게" 또는 "아주크게"를 눌러 주세요.'},
@@ -1299,12 +1339,10 @@ function renderMypage(){
     <div class="progress-track"><div class="progress-fill" style="width:${rate}%;"></div></div>`;
 
   const menu=[
-    {icon:'🔔',label:'복약 알림 설정',key:'alert'},
-    {icon:'💊',label:'복약 정보 관리',key:'meds'},
+    {icon:'💊',label:'복약 관리',key:'manage'},
     {icon:'👪',label:'보호자 연동',key:'caregiver'},
     {icon:'🔤',label:'글자 크기 설정',key:'fontsize'},
     {icon:'📖',label:'앱 사용 방법',key:'manual'},
-    {icon:'ℹ️',label:'앱 정보',key:'appinfo'},
   ];
   document.getElementById('mypage-menu').innerHTML=menu.map(m=>`
     <div class="menu-row" data-detail="${m.key}">
@@ -1319,16 +1357,22 @@ function renderMypage(){
 
 /* ================= DETAIL OVERLAY ================= */
 function openDetail(type){
+  // 예전 '복약 알림 설정'/'복약 정보 관리'는 하나의 '복약 관리' 화면으로 통합
+  const wasMeds = (type==='meds');
+  if(type==='alert'||type==='meds') type='manage';
+  const ov=document.getElementById('detail-overlay');
+  const keepScroll = (currentDetail==='manage' && type==='manage') ? ov.scrollTop : 0;
   currentDetail=type;
-  if(type!=='meds') editingMedId=null;
+  if(!wasMeds && type!=='manage') editingMedId=null;
   const titles={
-    alert:'복약 알림 설정', meds:'복약 정보 관리', caregiver:'보호자 연동',
-    fontsize:'글자 크기 설정', appinfo:'앱 정보', manual:'앱 사용 방법', sideeffect:'불편한 점 기록', profile:'개인정보 보기', notifications:'알림',
+    manage:'복약 관리', caregiver:'보호자 연동',
+    fontsize:'글자 크기 설정', manual:'앱 사용 방법', sideeffect:'불편한 점 기록', profile:'개인정보 보기', notifications:'알림',
   };
   document.getElementById('detail-title').textContent=titles[type]||'';
   document.getElementById('detail-body').innerHTML = detailBodyHTML(type);
   bindDetailEvents(type);
-  document.getElementById('detail-overlay').classList.add('show');
+  ov.classList.add('show');
+  if(keepScroll) ov.scrollTop=keepScroll;
 }
 function closeDetail(){
   document.getElementById('detail-overlay').classList.remove('show');
@@ -1338,6 +1382,10 @@ function switchHTML(id, checked){
   return `<label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="track"></span><span class="thumb"></span></label>`;
 }
 function detailBodyHTML(type){
+  if(type==='manage'){
+    return `<p class="arc-card-title" style="margin:6px 2px 8px;">💊 복약 정보 관리</p>`+detailBodyHTML('meds')
+      +`<p class="arc-card-title" style="margin:22px 2px 8px;">🔔 복약 알림 설정</p>`+detailBodyHTML('alert');
+  }
   if(type==='alert'){
     const pushBtnHtml = pushEnabled
       ? `<button class="btn-outline" id="push-toggle-btn">🔕 이 기기 푸시 알림 끄기</button>`
@@ -1442,14 +1490,6 @@ function detailBodyHTML(type){
     const cards=MANUAL_CARDS.map((c,i)=>`<div class="manual-card"><span class="mn">${i+1} / ${MANUAL_CARDS.length}</span><span class="mi">${c.icon}</span><h3>${c.title}</h3><p>${c.desc}</p></div>`).join('');
     return `<div style="padding-top:8px;">${cards}<button class="btn-primary" id="manual-close" type="button">알겠어요</button></div>`;
   }
-  if(type==='appinfo'){
-    return `
-      <div class="card pad-md">
-        <p style="font-size:1.4rem; margin:0 0 6px;">☀️✅</p>
-        <b style="font-size:1.05rem; display:block; margin-bottom:6px;">오늘, 해냈어요</b>
-        <span class="hint-text" style="margin-top:0;">버전 1.0.0 · 복약 순응도를 높이는 어르신 맞춤 복약 자가관리 앱입니다. 기록은 이 기기 안에만 저장돼요.</span>
-      </div>`;
-  }
   if(type==='profile'){
     return `
       <div class="card pad-md">
@@ -1489,6 +1529,7 @@ function medListHTML(){
   }).join('');
 }
 function bindDetailEvents(type){
+  if(type==='manage'){ bindDetailEvents('meds'); bindDetailEvents('alert'); return; }
   if(type==='sideeffect') bindSideEffectEvents();
   if(type==='manual'){
     markManualSeen();
@@ -1632,7 +1673,6 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
 document.getElementById('rec-seg-schedule').addEventListener('click', ()=>{ recordSubview='schedule'; renderRecord(); });
 document.getElementById('rec-seg-log').addEventListener('click', ()=>{ recordSubview='log'; renderRecord(); });
 document.getElementById('detail-back-btn').addEventListener('click', closeDetail);
-document.getElementById('mypage-gear-btn').addEventListener('click', ()=>openDetail('appinfo'));
 document.getElementById('bell-btn').addEventListener('click', ()=>openDetail('notifications'));
 
 /* ---------- Drawer ---------- */
