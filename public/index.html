@@ -88,7 +88,7 @@ button, input{font-family:inherit;}
 }
 .badge-dot.show{display:block;}
 
-/* ---------- Simple root-tab header (복약체크/기록/건강정보/마이페이지) ---------- */
+/* ---------- Simple root-tab header (복약체크/기록/건강정보/설정) ---------- */
 .root-topbar{
   display:flex; align-items:center; justify-content:space-between;
   padding:calc(18px + env(safe-area-inset-top)) 18px 6px;
@@ -123,8 +123,10 @@ button, input{font-family:inherit;}
   cursor:pointer;
   min-height:56px;
 }
-.status-pill-card .txt{flex:1; font-size:0.98rem; font-weight:600;}
-.status-pill-card .chev{color:var(--text-faint); font-size:1.1rem;}
+.status-pill-card .txt-wrap{flex:1; min-width:0;}
+.status-pill-card .txt{display:block; font-size:0.98rem; font-weight:600;}
+.status-pill-card .pill-caption{display:block; margin-top:3px; font-size:0.78rem; font-weight:600; color:var(--primary-deep);}
+.status-pill-card .chev{color:var(--text-faint); font-size:1.1rem; flex-shrink:0;}
 
 /* ---------- Arc progress (home / schedule) ---------- */
 .arc-card-head{display:flex; justify-content:space-between; align-items:flex-start;}
@@ -360,6 +362,44 @@ button, input{font-family:inherit;}
 .day-cell.missed .num{color:#C4432F;}
 .day-cell.upcoming{background:#F6F7F9; color:var(--text-faint);}
 
+/* ---------- 월간 달력(진짜 격자형) ---------- */
+.month-nav-today{
+  border:1.5px solid var(--line); background:#fff; border-radius:999px;
+  padding:6px 14px; font-size:0.82rem; color:var(--text-sub); cursor:pointer; min-height:36px;
+}
+.cal-dow-row{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; margin:4px 0 2px;}
+.cal-dow-row span{font-size:0.78rem; color:var(--text-sub); padding:4px 0;}
+.cal-dow-row span:first-child{color:#D9544A;}
+.cal-grid{
+  display:grid; grid-template-columns:repeat(7,1fr); gap:4px;
+  width:100%; box-sizing:border-box;
+}
+.cal-cell{
+  aspect-ratio:1/1; min-width:0;
+  border-radius:12px; background:#F6F7F9;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  cursor:pointer; border:2px solid transparent; position:relative;
+  padding:2px;
+}
+.cal-cell.empty{background:transparent; cursor:default;}
+.cal-cell .num{font-size:0.86rem; font-weight:700;}
+.cal-cell .dots{display:flex; gap:2px; margin-top:2px; height:5px;}
+.cal-cell .dots i{width:4px; height:4px; border-radius:50%; background:var(--primary); display:inline-block;}
+.cal-cell.today{border-color:var(--sky-deep, #3E8FC4);}
+.cal-cell.selected{border-color:var(--text);}
+.cal-cell.full{background:var(--primary-tint);}
+.cal-cell.full .num{color:var(--primary-deep);}
+.cal-cell.partial{background:#EAF3FB;}
+.cal-cell.missed{background:var(--coral-tint);}
+.cal-cell.missed .num{color:#C4432F;}
+.cal-cell.upcoming .num{color:var(--text-faint);}
+@media (max-width:360px){
+  .cal-cell .num{font-size:0.76rem;}
+}
+.legend{display:flex; flex-wrap:wrap; gap:10px; font-size:0.78rem; color:var(--text-sub); margin:10px 2px 0;}
+.legend span{display:inline-flex; align-items:center; gap:5px;}
+.legend i{width:10px; height:10px; border-radius:50%; display:inline-block;}
+
 .day-detail-title{font-size:1rem; font-weight:800; margin:6px 0 10px;}
 .day-summary-row{
   display:flex; align-items:center; gap:12px;
@@ -536,6 +576,39 @@ button, input{font-family:inherit;}
 .notif-row span{font-size:0.78rem; color:var(--text-sub);}
 
 .foot-space{height:10px;}
+
+/* ---------- v8: 어르신 사용성 개선 ---------- */
+.home-big-btn{
+  display:block; width:100%; min-height:64px; margin:12px 0 0;
+  border:none; border-radius:var(--r-sm); background:var(--primary); color:#fff;
+  font-size:1.1rem; font-weight:800; cursor:pointer; padding:12px 14px; line-height:1.35;
+}
+.home-big-btn:active{transform:scale(.98);}
+.home-big-btn.soft{background:var(--primary-tint); color:var(--primary-deep); border:1.5px solid var(--primary);}
+.home-big-btn.side{background:#fff; color:#C4432F; border:1.5px solid var(--coral);}
+.home-recent-row{display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--line); font-size:1rem;}
+.home-recent-row b{font-weight:800;}
+.home-recent-row span{color:var(--text-sub); font-weight:700;}
+.symptom-grid{display:flex; flex-wrap:wrap; gap:10px; margin:10px 0 14px;}
+.symptom-chip{min-height:56px; padding:0 18px; border-radius:28px; border:1.5px solid var(--line); background:#fff; font-size:1.05rem; font-weight:700; cursor:pointer; color:var(--text);}
+.symptom-chip.on{background:var(--coral-tint); border-color:var(--coral); color:#C4432F;}
+.se-row{display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--line);}
+.se-row:last-child{border-bottom:none;}
+.se-row .se-main{flex:1; min-width:0;}
+.se-row .se-main b{display:block; font-size:1rem;}
+.se-row .se-main span{font-size:0.88rem; color:var(--text-sub); word-break:break-word;}
+.se-del{min-height:44px; min-width:56px; border:1.5px solid var(--line); border-radius:var(--r-sm); background:#fff; color:#C4432F; font-weight:700; font-size:0.95rem; cursor:pointer;}
+.manual-card{background:#fff; border-radius:var(--r-md,16px); padding:20px 18px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); border:1px solid var(--line);}
+.manual-card .mn{display:inline-block; font-size:0.8rem; font-weight:800; color:var(--primary-deep); background:var(--primary-tint); border-radius:12px; padding:2px 10px;}
+.manual-card .mi{display:block; font-size:2.4rem; margin:8px 0 4px;}
+.manual-card h3{margin:0 0 6px; font-size:1.2rem; font-weight:800;}
+.manual-card p{margin:0; font-size:1rem; line-height:1.55; color:var(--text-sub);}
+.firstrun-sheet{position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:20px;}
+.firstrun-sheet.show{display:flex;}
+.firstrun-box{background:#fff; border-radius:20px; padding:24px 20px; width:100%; max-width:380px; text-align:center;}
+.firstrun-box h3{margin:0 0 8px; font-size:1.25rem;}
+.firstrun-box p{margin:0 0 18px; font-size:1rem; color:var(--text-sub); line-height:1.5;}
+.firstrun-box button{margin-top:8px;}
 </style>
 </head>
 <body>
@@ -568,11 +641,12 @@ button, input{font-family:inherit;}
 
       <div class="hscroll" id="home-stats"></div>
 
-      <div class="section-head">
-        <h2>오늘의 맞춤 건강 정보</h2>
-        <span class="more" id="home-more-health">더보기 ›</span>
-      </div>
-      <div id="home-health-card"></div>
+      <button class="home-big-btn" id="home-register-btn" type="button"></button>
+
+      <div class="card pad-md" id="home-recent-card"></div>
+
+      <button class="home-big-btn side" id="home-sideeffect-btn" type="button">😣 약 먹고 불편한 점이 있으셨나요?</button>
+      <div class="foot-space"></div>
     </div>
   </div>
 
@@ -584,12 +658,16 @@ button, input{font-family:inherit;}
         <b id="check-date-label" style="font-size:0.98rem;"></b>
         <span>📅</span>
       </div>
-      <div class="slot-chip-row" id="check-slot-row"></div>
-      <div class="card" id="check-detail-card"></div>
-      <div class="section-head"><h2>오늘의 복약 목록</h2></div>
-      <div class="card pad-md" id="check-med-list"></div>
-      <button class="btn-primary" id="check-confirm-btn"></button>
-      <div id="check-encourage-slot"></div>
+      <div id="check-empty-state"></div>
+      <div id="check-main-content">
+        <div class="slot-chip-row" id="check-slot-row"></div>
+        <div class="card" id="check-detail-card"></div>
+        <div class="section-head"><h2>오늘의 복약 목록</h2></div>
+        <div class="card pad-md" id="check-med-list"></div>
+        <button class="btn-primary" id="check-confirm-btn"></button>
+        <div class="card pad-md" id="check-three-way" style="display:none;"></div>
+        <div id="check-encourage-slot"></div>
+      </div>
     </div>
   </div>
 
@@ -617,11 +695,11 @@ button, input{font-family:inherit;}
     </div>
   </div>
 
-  <!-- ============ 마이페이지 ============ -->
+  <!-- ============ 설정 ============ -->
   <div class="tab-view" id="tab-mypage">
     <div class="root-topbar">
-      <span class="root-title">마이페이지</span>
-      <button class="icon-btn" id="mypage-gear-btn" aria-label="앱 정보">⚙️</button>
+      <span class="root-title">설정</span>
+      <button class="icon-btn" id="mypage-gear-btn" aria-label="앱 정보">ℹ️</button>
     </div>
     <div class="tab-content">
       <div class="card tap profile-card" id="profile-card-btn"></div>
@@ -645,7 +723,7 @@ button, input{font-family:inherit;}
     <button class="nav-btn" data-tab="check"><span class="icon">✅</span>복약체크</button>
     <button class="nav-btn" data-tab="record"><span class="icon">🗂️</span>기록</button>
     <button class="nav-btn" data-tab="health"><span class="icon">💚</span>건강정보</button>
-    <button class="nav-btn" data-tab="mypage"><span class="icon">👤</span>마이페이지</button>
+    <button class="nav-btn" data-tab="mypage"><span class="icon">⚙️</span>설정</button>
   </nav>
 
   <!-- ============ DETAIL OVERLAY ============ -->
@@ -665,11 +743,20 @@ button, input{font-family:inherit;}
     <div class="dlink" data-tab="check">✅ 복약체크</div>
     <div class="dlink" data-tab="record">🗂️ 기록</div>
     <div class="dlink" data-tab="health">💚 건강 정보</div>
-    <div class="dlink" data-tab="mypage">👤 마이페이지</div>
+    <div class="dlink" data-tab="mypage">⚙️ 설정</div>
   </div>
 
 </div>
 
+<div class="firstrun-sheet" id="firstrun-sheet">
+  <div class="firstrun-box">
+    <div style="font-size:2.6rem;">📖</div>
+    <h3>처음이시죠?</h3>
+    <p>앱 사용 방법을 1분이면 볼 수 있어요.</p>
+    <button class="btn-primary" id="firstrun-open" type="button">사용 방법 보기</button>
+    <button class="btn-outline" id="firstrun-skip" type="button">다음에 볼게요</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script src="./app.js"></script>

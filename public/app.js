@@ -77,6 +77,7 @@ async function syncPushConfig(){
         subscription: pushSubscription.toJSON(),
         times: state.times,
         labels: state.slots.map(s=>s.label),
+        activeSlotKeys: activeSlots().map(s=>s.key), // 약이 등록된 시간대만 서버가 알림을 보내도록
         preReminderEnabled: state.preReminderEnabled,
         preReminderOffset: state.preReminderOffset,
         repeatAlarmEnabled: state.repeatAlarmEnabled,
@@ -86,12 +87,12 @@ async function syncPushConfig(){
   }catch(e){ /* 네트워크 오류는 조용히 무시 - 다음 변경 시 재시도됨 */ }
 }
 
-async function sendCheckinToServer(slotKey){
+async function sendCheckinToServer(slotKey, status){
   if(!pushEnabled || !pushSubscription) return;
   try{
     await fetch('/api/checkin', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ endpoint: pushSubscription.endpoint, slotKey, date: dateKey(nowDate()) }),
+      body: JSON.stringify({ endpoint: pushSubscription.endpoint, slotKey, date: dateKey(nowDate()), status: status||'taken' }),
     });
   }catch(e){ /* 무시 */ }
 }
@@ -134,13 +135,14 @@ const state={
   name:'어르신',
   fontSize:16,
   times:['08:00','12:30','18:30','21:30'],
-  soundAlert:true,
+  soundAlert:true,       // 차임벨(알림음) ON/OFF
+  voiceReminderEnabled:true, // 🔊 음성 복약 알림("약 먹을 시간입니다") ON/OFF - 기본값 ON
   familyAlert:false,
   slots:[
-    {key:'morning',label:'아침',icon:'🌅',intent:'식사 후 드세요',taken:false},
-    {key:'noon',label:'점심',icon:'🌞',intent:'식사 후 드세요',taken:false},
-    {key:'evening',label:'저녁',icon:'🌇',intent:'식사 후 드세요',taken:false},
-    {key:'night',label:'취침전',icon:'🌙',intent:'주무시기 전에',taken:false},
+    {key:'morning',label:'아침',icon:'🌅',intent:'식사 후 드세요',taken:false,skipped:false},
+    {key:'noon',label:'점심',icon:'🌞',intent:'식사 후 드세요',taken:false,skipped:false},
+    {key:'evening',label:'저녁',icon:'🌇',intent:'식사 후 드세요',taken:false,skipped:false},
+    {key:'night',label:'취침전',icon:'🌙',intent:'주무시기 전에',taken:false,skipped:false},
   ],
   medicationRecords:{},    // { "YYYY-MM-DD": {morning:'taken'|'missed', ...} } - 날짜별 복약 기록 (오늘 포함, 항상 최신 상태로 저장)
   lastActiveDate:null,     // 마지막으로 앱을 사용한 날짜 (롤오버 판단용)
@@ -155,10 +157,16 @@ const state={
   repeatCounts:{},
   medIdSeq:1,
   notifLog:[],
+  sideEffects:[],          // [{id,date,slot,symptom,other,createdAt}] - 약 먹고 불편한 점 기록 (별도 저장)
+  manualSeen:false,        // 사용 방법 안내를 이미 보여줬는지
 };
 
 let currentTab='home';
 let checkSelectedSlot=null;
+let editingMedId=null;
+let snoozeUntilMin={}; // { slotKey: 그날 안에서의 분(0~1439) } - "나중에 복용" 눌렀을 때 다음 알림 시각 (세션 한정, 저장 안 함)
+const AUTO_CLOSE_MINUTES=120; // 복용 예정 시간 이후 2시간이 지나면 자동으로 알림을 끝내고 미복용 처리
+const SNOOZE_MINUTES=20;      // "나중에 복용" 선택 시 다시 알리기까지 걸리는 시간
 let recordSubview='schedule';
 let logMonthCursor=new Date(nowDate().getFullYear(), nowDate().getMonth(), 1);
 let logSelectedDate=nowDate();
@@ -231,10 +239,10 @@ function speak(text){
    }
 ================================================================ */
 
-/* 오늘 하루의 최신 복약 상태 스냅샷 (taken/missed만 기록, 아직 복약 전인 슬롯은 기록하지 않음) */
+/* 오늘 하루의 최신 복약 상태 스냅샷 (taken/missed만 기록, 아직 복약 전인 슬롯·약이 없는 시간대는 기록하지 않음) */
 function currentDaySnapshot(){
   const rec={};
-  state.slots.forEach(s=>{
+  activeSlots().forEach(s=>{
     const st=slotStatusToday(s);
     if(st==='taken') rec[s.key]='taken';
     else if(st==='missed') rec[s.key]='missed';
@@ -253,6 +261,7 @@ function buildAppData(){
       times:state.times,
       slotLabels:state.slots.map(s=>s.label),
       soundAlert:state.soundAlert,
+      voiceReminderEnabled:state.voiceReminderEnabled,
       familyAlert:state.familyAlert,
       preReminderEnabled:state.preReminderEnabled,
       preReminderOffset:state.preReminderOffset,
@@ -261,6 +270,8 @@ function buildAppData(){
     },
     reasons:state.slotReasons,
     consultRequested:state.consultRequested,
+    sideEffects:state.sideEffects,
+    manualSeen:state.manualSeen,
     meta:{
       medIdSeq:state.medIdSeq,
       lastActiveDate:state.lastActiveDate,
@@ -290,6 +301,7 @@ function migrateLegacyIfNeeded(){
     if(typeof old.fontSize==='number') state.fontSize=old.fontSize;
     if(Array.isArray(old.times)&&old.times.length===4) state.times=old.times;
     if(typeof old.soundAlert==='boolean') state.soundAlert=old.soundAlert;
+    if(typeof old.voiceReminderEnabled==='boolean') state.voiceReminderEnabled=old.voiceReminderEnabled;
     if(typeof old.familyAlert==='boolean') state.familyAlert=old.familyAlert;
     if(old.history && typeof old.history==='object') state.medicationRecords=old.history;
     if(old.lastActiveDate) state.lastActiveDate=old.lastActiveDate;
@@ -336,6 +348,7 @@ function loadState(){
       });
     }
     if(typeof s.soundAlert==='boolean') state.soundAlert=s.soundAlert;
+    if(typeof s.voiceReminderEnabled==='boolean') state.voiceReminderEnabled=s.voiceReminderEnabled;
     if(typeof s.familyAlert==='boolean') state.familyAlert=s.familyAlert;
     if(typeof s.preReminderEnabled==='boolean') state.preReminderEnabled=s.preReminderEnabled;
     if(typeof s.preReminderOffset==='number') state.preReminderOffset=s.preReminderOffset;
@@ -344,6 +357,8 @@ function loadState(){
 
     if(d.reasons && typeof d.reasons==='object') state.slotReasons=d.reasons;
     if(typeof d.consultRequested==='boolean') state.consultRequested=d.consultRequested;
+    if(Array.isArray(d.sideEffects)) state.sideEffects=d.sideEffects.filter(x=>x && typeof x==='object' && x.date);
+    if(typeof d.manualSeen==='boolean') state.manualSeen=d.manualSeen;
 
     const meta=d.meta||{};
     if(typeof meta.medIdSeq==='number') state.medIdSeq=meta.medIdSeq;
@@ -357,7 +372,10 @@ function loadState(){
     const todayKey=dateKey(nowDate());
     const todayRec=state.medicationRecords[todayKey];
     if(todayRec){
-      state.slots.forEach(sl=>{ if(todayRec[sl.key]==='taken') sl.taken=true; });
+      state.slots.forEach(sl=>{
+        if(todayRec[sl.key]==='taken') sl.taken=true;
+        else if(todayRec[sl.key]==='missed') sl.skipped=true; // 건너뜀/2시간초과로 이미 확정된 상태 복원
+      });
     }
   }catch(e){
     // 저장된 데이터가 손상된 경우: 흰 화면 대신 기본값으로 계속 진행
@@ -378,14 +396,15 @@ function rolloverIfNeeded(){
     const key=dateKey(cursor);
     const existing=state.medicationRecords[key]||{};
     const finalized={};
-    state.slots.forEach(s=>{ finalized[s.key]= existing[s.key]==='taken' ? 'taken' : 'missed'; });
+    activeSlots().forEach(s=>{ finalized[s.key]= existing[s.key]==='taken' ? 'taken' : 'missed'; });
     state.medicationRecords[key]=finalized;
     cursor.setDate(cursor.getDate()+1);
     guard++;
   }
-  state.slots.forEach(s=>{ s.taken=false; });
+  state.slots.forEach(s=>{ s.taken=false; s.skipped=false; });
   state.repeatCounts={};
   state.alarmedSlots.clear();
+  snoozeUntilMin={};
   state.lastActiveDate=todayKey;
   checkSelectedSlot=null;
 }
@@ -401,8 +420,10 @@ function resetAllData(){
   state.fontSize=16;
   state.times=['08:00','12:30','18:30','21:30'];
   state.soundAlert=true;
+  state.voiceReminderEnabled=true;
   state.familyAlert=false;
-  state.slots.forEach((s,i)=>{ s.taken=false; s.label=DEFAULT_LABELS[i]; });
+  state.slots.forEach((s,i)=>{ s.taken=false; s.skipped=false; s.label=DEFAULT_LABELS[i]; });
+  snoozeUntilMin={};
   state.medicationRecords={};
   state.lastActiveDate=null;
   state.missedNotified={};
@@ -416,6 +437,8 @@ function resetAllData(){
   state.repeatCounts={};
   state.medIdSeq=1;
   state.notifLog=[];
+  state.sideEffects=[];
+  state.manualSeen=true; // 삭제 직후 첫 실행 안내가 다시 뜨지 않게
 
   checkSelectedSlot=null;
   logMonthCursor=new Date(nowDate().getFullYear(), nowDate().getMonth(), 1);
@@ -432,19 +455,35 @@ function resetAllData(){
 
 /* ---------- Derived computations ---------- */
 function slotIndex(slot){ return state.slots.indexOf(slot); }
+/* 실제로 약이 등록된 시간대만 반환 - 첫 화면/복약체크/기록/놓침판정 전부 이 목록 기준으로 동작 */
+function activeSlots(){
+  return state.slots.filter(s => state.medications.some(m => Array.isArray(m.slots) && m.slots.includes(s.key)));
+}
 function slotStatusToday(slot){
-  const now=nowDate();
   if(slot.taken) return 'taken';
+  if(slot.skipped) return 'missed'; // 사용자가 "건너뜀"을 직접 선택한 경우 - 즉시 미복용 확정
+  const now=nowDate();
   const t=timeToMinutes(state.times[slotIndex(slot)]);
-  if(nowMinutes(now)>t+60) return 'missed';
+  // 복용 예정 시간으로부터 AUTO_CLOSE_MINUTES(2시간)가 지나도 선택이 없으면 자동으로 미복용 처리
+  if(nowMinutes(now)>t+AUTO_CLOSE_MINUTES) return 'missed';
   return 'pending';
 }
+/* 알림이 떠서 사용자의 선택(복용함/건너뜀/나중에)을 기다리고 있는 상태인지
+   - 복용 예정 시간이 지났고(curMin>=t), 아직 결정되지 않았고(pending), 2시간 자동종료 전인 경우 */
+function isAwaitingDecision(slot){
+  if(slot.taken||slot.skipped) return false;
+  const t=timeToMinutes(state.times[slotIndex(slot)]);
+  const cur=nowMinutes(nowDate());
+  return cur>=t && cur<=t+AUTO_CLOSE_MINUTES;
+}
 function currentActiveSlot(){
-  const notTaken=state.slots.filter(s=>!s.taken);
+  const notTaken=activeSlots().filter(s=>!s.taken);
   return notTaken.length ? notTaken[0] : null;
 }
 function todayDaySummary(){
-  const statuses=state.slots.map(slotStatusToday);
+  const slots=activeSlots();
+  if(slots.length===0) return 'upcoming'; // 등록된 약이 없으면 이행률 계산에서 제외(= 놓침 아님)
+  const statuses=slots.map(slotStatusToday);
   if(statuses.every(s=>s==='taken')) return 'full';
   if(statuses.some(s=>s==='taken')) return 'partial';
   return 'upcoming';
@@ -454,14 +493,14 @@ function daySlotStatuses(date){
   const todayKey=dateKey(nowDate());
   if(key===todayKey){
     const o={};
-    state.slots.forEach(s=>{
+    activeSlots().forEach(s=>{
       const st=slotStatusToday(s);
       o[s.key]= st==='taken' ? 'taken' : (st==='missed' ? 'missed' : 'pending');
     });
-    return o;
+    return o; // 약이 없는 시간대는 아예 포함하지 않음(= 놓침으로 판단되지 않음)
   }
-  if(key>todayKey) return {morning:'upcoming',noon:'upcoming',evening:'upcoming',night:'upcoming'};
-  return state.medicationRecords[key] || {morning:'upcoming',noon:'upcoming',evening:'upcoming',night:'upcoming'};
+  if(key>todayKey) return {};
+  return state.medicationRecords[key] || {};
 }
 function daySummaryStatus(date){
   const st=daySlotStatuses(date);
@@ -516,18 +555,22 @@ function computeStreak(){
   return streak;
 }
 function computeMissedHistory(){
-  const result={morning:0,noon:0,evening:0,night:0};
+  const slots=activeSlots();
+  const result={};
+  slots.forEach(s=>{ result[s.key]=0; });
   for(let i=0;i<7;i++){
     const d=new Date(); d.setDate(d.getDate()-i);
     const st=daySlotStatuses(d);
-    state.slots.forEach(s=>{ if(st[s.key]==='missed') result[s.key]++; });
+    slots.forEach(s=>{ if(st[s.key]==='missed') result[s.key]++; });
   }
   return result;
 }
 function maxMissedInfo(){
+  const slots=activeSlots();
+  if(slots.length===0) return { key:null, count:-1 };
   const mh=computeMissedHistory();
   let bestKey=null,bestVal=-1;
-  state.slots.forEach(slot=>{ const v=mh[slot.key]; if(v>bestVal){bestVal=v;bestKey=slot.key;} });
+  slots.forEach(slot=>{ const v=mh[slot.key]||0; if(v>bestVal){bestVal=v;bestKey=slot.key;} });
   return {key:bestKey,count:bestVal};
 }
 function slotLabelByKey(key){ const s=state.slots.find(s=>s.key===key); return s?s.label:key; }
@@ -575,33 +618,51 @@ function renderHome(){
   document.getElementById('home-hello').textContent='안녕하세요,';
   document.getElementById('home-name').textContent=`${state.name} 어르신`;
 
-  const missed=state.slots.find(s=>slotStatusToday(s)==='missed');
+  const slots=activeSlots();
+  const missed=slots.find(s=>slotStatusToday(s)==='missed');
   const active=currentActiveSlot();
   const pill=document.getElementById('status-pill');
-  if(missed){
-    pill.innerHTML=`<span style="font-size:1.2rem;">🌷</span><span class="txt">아직 ${missed.label} 약을 못 챙기셨어요. 확인해볼까요?</span><span class="chev">›</span>`;
+  const md=`${nowDate().getMonth()+1}월 ${nowDate().getDate()}일`;
+  const yak=(l)=>/약$/.test(l)?l:l+' 약';
+  if(slots.length===0){
+    pill.innerHTML=pillInnerHTML('💊',`${md} · 등록된 약이 없어요. 먼저 약을 등록해볼까요?`,'복약 정보 관리로 이동하기 →');
+    pill.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
+  } else if(missed){
+    pill.innerHTML=pillInnerHTML('🌷',`${md} ${yak(missed.label)}을 아직 못 챙기셨어요`,'복약 체크 화면으로 이동하기 →');
     pill.onclick=()=>{ checkSelectedSlot=missed.key; switchTab('check'); };
   } else if(!active){
-    pill.innerHTML=`<span style="font-size:1.2rem;">🎉</span><span class="txt">오늘 복약을 모두 완료하셨어요!</span><span class="chev">›</span>`;
+    pill.innerHTML=pillInnerHTML('🎉',`${md} 약을 모두 챙기셨어요 🎉`,'이번 주 기록 보러가기 →');
     pill.onclick=()=>switchTab('record');
   } else {
-    pill.innerHTML=`<span style="font-size:1.2rem;">${active.icon}</span><span class="txt">지금은 ${active.label} 복약 시간이에요</span><span class="chev">›</span>`;
+    pill.innerHTML=pillInnerHTML(active.icon,`${md} ${yak(active.label)} 드실 시간이에요`,'복약 체크 화면으로 이동하기 →');
     pill.onclick=()=>{ checkSelectedSlot=active.key; switchTab('check'); };
   }
 
-  const doneCount=state.slots.filter(s=>s.taken).length;
+  const doneCount=slots.filter(s=>s.taken).length;
   const nextSlot=currentActiveSlot();
-  document.getElementById('home-arc-card').innerHTML=`
-    <div class="arc-card-head">
-      <div>
-        <p class="arc-card-title">오늘의 복약 현황</p>
-        <p class="arc-card-num">${doneCount}<span>/${state.slots.length}회 완료</span></p>
-        <p class="arc-card-sub">${nextSlot? `다음 복약 시간: ${state.times[slotIndex(nextSlot)]}` : '오늘 복약을 모두 마쳤어요'}</p>
+  if(slots.length===0){
+    document.getElementById('home-arc-card').innerHTML=`
+      <div style="text-align:center; padding:10px 4px;">
+        <div style="font-size:2.4rem;">💊</div>
+        <p style="font-weight:800; margin:10px 0 4px;">등록된 약이 아직 없어요</p>
+        <p class="hint-text" style="margin:0 0 14px;">약을 등록하면 그 시간대만 여기에 표시돼요.</p>
+        <button class="btn-primary" id="home-arc-add-med-btn">약 등록하러 가기</button>
+      </div>`;
+    const btn=document.getElementById('home-arc-add-med-btn');
+    if(btn) btn.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
+  } else {
+    document.getElementById('home-arc-card').innerHTML=`
+      <div class="arc-card-head">
+        <div>
+          <p class="arc-card-title">오늘의 복약 현황</p>
+          <p class="arc-card-num">${doneCount}<span>/${slots.length}회 완료</span></p>
+          <p class="arc-card-sub">${nextSlot? `다음 복약 시간: ${state.times[slotIndex(nextSlot)]}` : '오늘 복약을 모두 마쳤어요'}</p>
+        </div>
       </div>
-    </div>
-    <div class="arc-wrap">${buildArcSVG()}</div>
-    ${slotChipRowHTML()}
-  `;
+      <div class="arc-wrap">${buildArcSVG(slots)}</div>
+      ${slotChipRowHTML(slots)}
+    `;
+  }
 
   const rate=computeAdherenceRate();
   const streak=computeStreak();
@@ -612,31 +673,55 @@ function renderHome(){
     <div class="stat-mini"><span class="emoji">📦</span><b>${depletionCount}건</b><span>처방약 소진 임박</span></div>
   `;
 
-  const info=maxMissedInfo();
-  let healthTitle='꾸준한 복약 습관을 이어가고 계세요', healthDesc='지금처럼 규칙적으로 챙겨주시면 충분해요.', healthEmoji='🌿';
-  if(info.count>=3){ healthTitle='약사 상담을 받아보시겠어요?'; healthDesc=`최근 ${slotLabelByKey(info.key)} 약을 ${info.count}회 놓치셨어요.`; healthEmoji='💬'; }
-  else if(info.count>=2){ healthTitle='복약 패턴을 확인해보세요'; healthDesc=`최근 ${slotLabelByKey(info.key)} 약을 자주 놓치고 계세요.`; healthEmoji='🔍'; }
-  document.getElementById('home-health-card').innerHTML=`
-    <div class="row-card" id="home-health-row">
-      <div class="row-thumb" style="background:var(--primary-tint);">${healthEmoji}</div>
-      <div class="row-main"><b>${healthTitle}</b><span>${healthDesc}</span></div>
-    </div>
-    ${state.medications.length===0 ? `
-    <div class="row-card" id="home-add-med-row" style="margin-top:10px;">
-      <div class="row-thumb" style="background:var(--amber-tint);">💊</div>
-      <div class="row-main"><b>복용 중인 약을 등록해보세요</b><span>마이페이지 &gt; 복약 정보 관리에서 추가할 수 있어요.</span></div>
-    </div>` : ''}
-  `;
-  document.getElementById('home-health-row').onclick=()=>switchTab('health');
-  document.getElementById('home-more-health').onclick=()=>switchTab('health');
-  const addMedRow=document.getElementById('home-add-med-row');
-  if(addMedRow) addMedRow.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
-
   document.getElementById('encourage-title').textContent = streak>0 ? `연속 ${streak}일째 잘하고 계세요!` : '오늘도 함께 챙겨봐요!';
+  renderHomeExtras(slots);
 }
 
-function slotChipRowHTML(){
-  return `<div class="slot-chip-row">` + state.slots.map((s,i)=>{
+/* 홈 하단: 약·알람 등록 / 최근 복약 기록 / 불편한 점 기록 */
+function renderHomeExtras(slots){
+  const reg=document.getElementById('home-register-btn');
+  reg.textContent='💊 약·알람 등록하기';
+  reg.className='home-big-btn'+(slots.length>0?' soft':'');
+  reg.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
+
+  const card=document.getElementById('home-recent-card');
+  let rows='';
+  if(slots.length===0){
+    rows=`<div class="hint-text" style="margin:0;">약을 등록하면 복약 기록이 여기에 표시돼요.</div>`;
+  } else {
+    const n=Math.min(5,7);
+    for(let i=0;i<n;i++){
+      const d=nowDate(); d.setDate(d.getDate()-i);
+      const st=daySlotStatuses(d);
+      const done=Object.values(st).filter(v=>v==='taken').length;
+      const label = i===0 ? '오늘' : `${d.getMonth()+1}월 ${d.getDate()}일`;
+      rows+=`<div class="home-recent-row"><b>${label} (${DOW[d.getDay()]})</b><span>완료 ${done}/${slots.length}</span></div>`;
+    }
+  }
+  card.innerHTML=`<p class="arc-card-title" style="margin-bottom:4px;">📋 최근 복약 기록</p>${rows}
+    <button class="btn-outline" id="home-all-records-btn" type="button" style="margin-top:12px; min-height:56px; font-size:1.05rem;">전체 기록 보기</button>`;
+  document.getElementById('home-all-records-btn').onclick=()=>{ recordSubview='log'; switchTab('record'); };
+
+  document.getElementById('home-sideeffect-btn').onclick=()=>openDetail('sideeffect');
+}
+
+/* 홈 화면 상단 상태 카드(status-pill) 내용을 만든다.
+   메인 문구 아래에 "~화면으로 이동하기 →" 같은 작은 안내 문구를 붙여서,
+   카드를 누르면 어디로 이동하는지 미리 알 수 있게 한다. */
+function pillInnerHTML(icon, mainText, captionText){
+  return `<span style="font-size:1.2rem;">${icon}</span>
+    <span class="txt-wrap">
+      <span class="txt">${mainText}</span>
+      <span class="pill-caption">${captionText}</span>
+    </span>
+    <span class="chev">›</span>`;
+}
+
+function slotChipRowHTML(slots){
+  slots = slots || activeSlots();
+  if(slots.length===0) return '';
+  return `<div class="slot-chip-row">` + slots.map((s)=>{
+    const i=slotIndex(s);
     const status=slotStatusToday(s);
     const cur = (currentActiveSlot() && currentActiveSlot().key===s.key) ? 'current' : '';
     const takenCls = status==='taken' ? 'taken' : '';
@@ -648,10 +733,12 @@ function slotChipRowHTML(){
   }).join('') + `</div>`;
 }
 
-function buildArcSVG(){
+function buildArcSVG(slots){
+  slots = slots || activeSlots();
+  const n=slots.length;
+  if(n===0) return '';
   const cx=150, cy=130, r=128;
-  const n=state.slots.length;
-  const doneRatio=state.slots.filter(s=>s.taken).length/n;
+  const doneRatio=slots.filter(s=>s.taken).length/n;
   const toXY=(ang)=>{ const rad=ang*Math.PI/180; return {x:cx+r*Math.cos(rad), y:cy-r*Math.sin(rad)}; };
   const arcPath=(a1,a2)=>{
     const p1=toXY(a1), p2=toXY(a2);
@@ -660,8 +747,8 @@ function buildArcSVG(){
   };
   const doneEndAngle=180-doneRatio*180;
   let dots='';
-  state.slots.forEach((slot,i)=>{
-    const angle=180-(180/(n-1))*i;
+  slots.forEach((slot,i)=>{
+    const angle = n===1 ? 90 : 180-(180/(n-1))*i;
     const {x,y}=toXY(angle);
     const status=slotStatusToday(slot);
     let fill='#FFFFFF', stroke='#DDE2E6', content=slot.icon;
@@ -679,17 +766,39 @@ function buildArcSVG(){
 
 /* ================= 복약체크 ================= */
 function renderCheck(){
-  if(!checkSelectedSlot){
+  const slots=activeSlots();
+  const emptyEl=document.getElementById('check-empty-state');
+  const mainEl=document.getElementById('check-main-content');
+
+  if(slots.length===0){
+    mainEl.style.display='none';
+    emptyEl.style.display='';
+    emptyEl.innerHTML=`
+      <div class="card" style="text-align:center;">
+        <div style="font-size:2.4rem;">💊</div>
+        <p style="font-weight:800; margin:10px 0 4px;">등록된 약이 없어요</p>
+        <p class="hint-text" style="margin:0 0 14px;">약을 등록하면 그 시간대만 여기서 확인할 수 있어요.</p>
+        <button class="btn-primary" id="check-empty-add-btn">약 등록하러 가기</button>
+      </div>`;
+    document.getElementById('check-empty-add-btn').onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
+    document.getElementById('check-date-label').textContent=fmtDateFull(nowDate());
+    return;
+  }
+  mainEl.style.display='';
+  emptyEl.style.display='none';
+  emptyEl.innerHTML='';
+
+  if(!checkSelectedSlot || !slots.find(s=>s.key===checkSelectedSlot)){
     const active=currentActiveSlot();
-    checkSelectedSlot = active ? active.key : state.slots[state.slots.length-1].key;
+    checkSelectedSlot = active ? active.key : slots[slots.length-1].key;
   }
   document.getElementById('check-date-label').textContent=fmtDateFull(nowDate());
-  document.getElementById('check-slot-row').innerHTML = slotChipRowInnerForCheck();
+  document.getElementById('check-slot-row').innerHTML = slotChipRowInnerForCheck(slots);
   document.querySelectorAll('#check-slot-row .slot-chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{ checkSelectedSlot=chip.getAttribute('data-slot'); renderCheck(); });
   });
 
-  const slot=state.slots.find(s=>s.key===checkSelectedSlot);
+  const slot=slots.find(s=>s.key===checkSelectedSlot);
   const i=slotIndex(slot);
   const status=slotStatusToday(slot);
   const badge = status==='taken' ? `<span class="status-badge done">복약 완료</span>`
@@ -713,13 +822,34 @@ function renderCheck(){
       <div class="med-check-icon">💊</div>
       <div class="med-check-main"><b>${m.name} ${m.dose||''}</b><span>${slot.intent}</span></div>
       <div class="check-circle ${check?'on':''}">${check?'✓':''}</div>
-    </div>`).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 마이페이지에서 약을 등록해보세요.</div>`;
+    </div>`).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 설정 > 복약 정보 관리에서 약을 등록해보세요.</div>`;
 
   const btn=document.getElementById('check-confirm-btn');
-  if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
-  else if(status==='missed'){ btn.textContent='지금 복용하기'; btn.disabled=false; btn.style.background='var(--coral)'; }
-  else { btn.textContent='확인 완료'; btn.disabled=false; btn.style.background=''; }
-  btn.onclick=()=>toggleSlot(slot.key);
+  const threeWayEl=document.getElementById('check-three-way');
+
+  if(isAwaitingDecision(slot)){
+    // 복용 예정 시간이 지났고 아직 결정이 없는 상태(2시간 안) - 3가지 선택지 제공
+    btn.style.display='none';
+    threeWayEl.style.display='';
+    threeWayEl.innerHTML=`
+      <p class="hint-text" style="margin:0 0 10px; text-align:center;">${slot.label} 약, 어떻게 하셨나요?</p>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-primary" id="three-taken" style="flex:1;">복용함</button>
+        <button class="btn-outline" id="three-skip" style="flex:1;">건너뜀</button>
+        <button class="btn-outline" id="three-later" style="flex:1;">나중에</button>
+      </div>`;
+    document.getElementById('three-taken').onclick=()=>toggleSlot(slot.key);
+    document.getElementById('three-skip').onclick=()=>skipSlotNow(slot.key);
+    document.getElementById('three-later').onclick=()=>snoozeSlotNow(slot.key);
+  } else {
+    threeWayEl.style.display='none';
+    threeWayEl.innerHTML='';
+    btn.style.display='';
+    if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
+    else if(status==='missed'){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
+    else { btn.textContent='확인 완료'; btn.disabled=false; btn.style.background=''; }
+    btn.onclick=()=>toggleSlot(slot.key);
+  }
 
   document.getElementById('check-encourage-slot').innerHTML = status==='taken' ? `
     <div class="card pad-md encourage-card">
@@ -727,8 +857,10 @@ function renderCheck(){
       <div class="encourage-text"><b>복약을 완료했어요!</b><span>이번에도 정말 잘하셨어요 :)</span></div>
     </div>` : '';
 }
-function slotChipRowInnerForCheck(){
-  return state.slots.map((s,i)=>{
+function slotChipRowInnerForCheck(slots){
+  slots = slots || activeSlots();
+  return slots.map((s)=>{
+    const i=slotIndex(s);
     const status=slotStatusToday(s);
     const takenCls=status==='taken'?'taken':'';
     const selCls=checkSelectedSlot===s.key?'selected current':'';
@@ -741,9 +873,41 @@ function toggleSlot(key){
   const slot=state.slots.find(s=>s.key===key);
   if(!slot||slot.taken) return;
   slot.taken=true;
+  slot.skipped=false;
+  delete snoozeUntilMin[key];
+  closeReminderNotification(key);
   toast(CHEER_TOASTS[Math.floor(Math.random()*CHEER_TOASTS.length)]);
-  sendCheckinToServer(key);
+  sendCheckinToServer(key,'taken');
   renderAll();
+}
+/* "건너뜀" - 해당 시간대 약을 미복용으로 즉시 확정하고 알림을 끝낸다 */
+function skipSlotNow(key){
+  const slot=state.slots.find(s=>s.key===key);
+  if(!slot||slot.taken||slot.skipped) return;
+  slot.skipped=true;
+  delete snoozeUntilMin[key];
+  closeReminderNotification(key);
+  toast(`${slot.label} 약을 미복용으로 기록했어요.`);
+  sendCheckinToServer(key,'skip');
+  renderAll();
+}
+/* "나중에 복용" - SNOOZE_MINUTES 뒤에 한 번만 다시 알려주고, 2시간 자동종료 범위를 넘지 않는다 */
+function snoozeSlotNow(key){
+  const slot=state.slots.find(s=>s.key===key);
+  if(!slot||slot.taken||slot.skipped) return;
+  const t=timeToMinutes(state.times[slotIndex(slot)]);
+  const target=Math.min(nowMinutes(nowDate())+SNOOZE_MINUTES, t+AUTO_CLOSE_MINUTES-1);
+  snoozeUntilMin[key]=target;
+  closeReminderNotification(key);
+  toast(`${SNOOZE_MINUTES}분 후 다시 알려드릴게요.`);
+  renderAll();
+}
+function closeReminderNotification(slotKey){
+  if('serviceWorker' in navigator && navigator.serviceWorker.ready){
+    navigator.serviceWorker.ready.then(reg=>{
+      reg.getNotifications({ tag: `reminder-${slotKey}` }).then(list=> list.forEach(n=>n.close()));
+    }).catch(()=>{});
+  }
 }
 
 /* ================= 기록 ================= */
@@ -756,16 +920,22 @@ function renderRecord(){
   if(alertLink) alertLink.onclick=()=>openDetail('alert');
 }
 function recordScheduleHTML(){
+  const slots=activeSlots();
   const rate=computeAdherenceRate();
   const hist=getWeekHistory().filter(s=>s!=='upcoming');
   const doneDays=hist.filter(s=>s==='full').length;
+  const arcCardInner = slots.length===0
+    ? `<div style="text-align:center; padding:10px 4px;">
+         <div style="font-size:2rem;">💊</div>
+         <p class="hint-text" style="margin:8px 0 0;">등록된 약이 없어서 아직 보여드릴 일정이 없어요.</p>
+       </div>`
+    : `<div class="arc-wrap">${buildArcSVG(slots)}</div>${slotChipRowHTML(slots)}`;
   return `
     <div class="card pad-sm" style="display:flex; align-items:center; justify-content:space-between;">
       <b style="font-size:0.98rem;">${fmtDateFull(nowDate())}</b><span>📅</span>
     </div>
     <div class="card">
-      <div class="arc-wrap">${buildArcSVG()}</div>
-      ${slotChipRowHTML()}
+      ${arcCardInner}
     </div>
     <div class="card pad-md">
       <p class="arc-card-title">이번 주 복약 현황</p>
@@ -787,43 +957,60 @@ function recordScheduleHTML(){
       </div>
     </div>`;
 }
+/* 실제 요일 격자에 맞춘 월간 달력 (일~토 순서, 다른 달 날짜는 빈 칸으로만 패딩) */
 function recordLogHTML(){
+  const slots=activeSlots();
   const y=logMonthCursor.getFullYear(), m=logMonthCursor.getMonth();
+  const firstDay=new Date(y,m,1);
   const daysInMonth=new Date(y,m+1,0).getDate();
+  const leadingBlanks=firstDay.getDay(); // 0=일요일 ~ 6=토요일, 그대로 사용(일요일 시작)
+  const todayKeyStr=dateKey(nowDate());
+  const selectedKeyStr=dateKey(logSelectedDate);
+
   let cells='';
-  for(let d=1;d<=daysInMonth;d++){
+  for(let i=0;i<leadingBlanks;i++){ cells+=`<div class="cal-cell empty"></div>`; }
+  for(let d=1; d<=daysInMonth; d++){
     const date=new Date(y,m,d);
+    const kStr=dateKey(date);
     const status=daySummaryStatus(date);
-    const sel = date.toDateString()===logSelectedDate.toDateString() ? 'selected' : '';
-    cells+=`<div class="day-cell ${status} ${sel}" data-date="${dateKey(date)}">
-      <div class="dow">${DOW[date.getDay()]}</div><div class="num">${d}</div>
-    </div>`;
+    const recCount=Object.keys(daySlotStatuses(date)).length;
+    const dotCount=Math.min(recCount,4);
+    const dots = dotCount>0 ? `<div class="dots">${'<i></i>'.repeat(dotCount)}</div>` : '';
+    const cls=[status, kStr===todayKeyStr?'today':'', kStr===selectedKeyStr?'selected':''].filter(Boolean).join(' ');
+    cells+=`<div class="cal-cell ${cls}" data-date="${kStr}"><span class="num">${d}</span>${dots}</div>`;
   }
-  const filterChips=['all','morning','noon','evening','night'];
-  const filterLabels={all:'전체',morning:'아침',noon:'점심',evening:'저녁',night:'취침전'};
-  const chips=filterChips.map(f=>`<button class="chip-filter ${logFilter===f?'active':''}" data-filter="${f}">${filterLabels[f]}</button>`).join('');
+
+  const filterSlots=[{key:'all',label:'전체',icon:''}].concat(slots.map(s=>({key:s.key,label:s.label,icon:s.icon})));
+  const chips=filterSlots.map(f=>`<button class="chip-filter ${logFilter===f.key?'active':''}" data-filter="${f.key}">${f.icon?f.icon+' ':''}${f.label}</button>`).join('');
 
   const selStatuses=daySlotStatuses(logSelectedDate);
-  const slotRows=state.slots.filter(s=>logFilter==='all'||logFilter===s.key).map((s)=>{
+  const isFutureSel = selectedKeyStr>todayKeyStr;
+  const isTodaySel = selectedKeyStr===todayKeyStr;
+  const rowSlots=slots.filter(s=>logFilter==='all'||logFilter===s.key);
+  const slotRows = rowSlots.length ? rowSlots.map((s)=>{
     const st=selStatuses[s.key];
-    const label = st==='taken' ? '완료' : st==='upcoming' ? '예정' : st==='pending' ? '복약 전' : '미복약';
+    const label = st==='taken' ? '완료' : st==='missed' ? '미복약' : (isFutureSel ? '예정' : (isTodaySel ? '복약 전' : '기록 없음'));
     const cls = st==='taken' ? 'done' : st==='missed' ? 'warn' : 'pending';
     return `<div class="med-check-row">
       <div class="med-check-icon">${s.icon}</div>
       <div class="med-check-main"><b>${s.label}</b><span>${state.times[slotIndex(s)]}</span></div>
       <span class="status-badge ${cls}">${label}</span>
     </div>`;
-  }).join('');
+  }).join('') : `<div class="hint-text" style="margin:0;">이 날짜에는 표시할 복약 기록이 없어요.</div>`;
 
   let recentRows='';
-  for(let i=0;i<7;i++){
-    const d=new Date(); d.setDate(d.getDate()-i);
-    const st=daySlotStatuses(d);
-    const doneCnt=Object.values(st).filter(v=>v==='taken').length;
-    recentRows+=`<div class="day-summary-row" data-date="${dateKey(d)}">
-      <span class="d">${d.getMonth()+1}월 ${d.getDate()}일 (${DOW[d.getDay()]})</span>
-      <span class="ratio">${doneCnt}/4 완료</span>
-    </div>`;
+  if(slots.length===0){
+    recentRows=`<div class="hint-text" style="margin:0;">등록된 약이 없어요.</div>`;
+  } else {
+    for(let i=0;i<7;i++){
+      const d=new Date(); d.setDate(d.getDate()-i);
+      const st=daySlotStatuses(d);
+      const doneCnt=Object.values(st).filter(v=>v==='taken').length;
+      recentRows+=`<div class="day-summary-row" data-date="${dateKey(d)}">
+        <span class="d">${d.getMonth()+1}월 ${d.getDate()}일 (${DOW[d.getDay()]})</span>
+        <span class="ratio">${doneCnt}/${slots.length} 완료</span>
+      </div>`;
+    }
   }
 
   return `
@@ -833,20 +1020,37 @@ function recordLogHTML(){
       <b>${y}년 ${m+1}월</b>
       <button id="log-next-month">›</button>
     </div>
-    <div class="day-strip">${cells}</div>
+    <div style="text-align:right; margin:-6px 2px 8px;">
+      <button class="month-nav-today" id="log-today-btn">오늘</button>
+    </div>
+    <div class="card pad-md">
+      <div class="cal-dow-row"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+      <div class="cal-grid">${cells}</div>
+      ${legendHTML()}
+    </div>
     <div class="card">
       <div class="day-detail-title">${fmtDateFull(logSelectedDate)}</div>
       ${slotRows}
+      ${sideEffectDayHTML(selectedKeyStr)}
     </div>
     <div class="section-head"><h2>최근 기록</h2></div>
     <div class="card pad-md">${recentRows}</div>
   `;
 }
+function legendHTML(){
+  return `<div class="legend">
+    <span><i style="background:var(--primary);"></i>완료</span>
+    <span><i style="background:#8FC4EA;"></i>일부</span>
+    <span><i style="background:var(--coral);"></i>놓침</span>
+    <span><i style="background:#D9DDE1;"></i>예정/기록없음</span>
+  </div>`;
+}
 function bindRecordLogEvents(){
+  document.querySelectorAll('#record-body [data-se-del]').forEach(b=>b.addEventListener('click',()=>deleteSideEffect(b.getAttribute('data-se-del'))));
   document.querySelectorAll('.chip-filter').forEach(c=>{
     c.addEventListener('click', ()=>{ logFilter=c.getAttribute('data-filter'); renderRecord(); });
   });
-  document.querySelectorAll('.day-cell').forEach(c=>{
+  document.querySelectorAll('.cal-cell:not(.empty)').forEach(c=>{
     c.addEventListener('click', ()=>{ logSelectedDate=parseDateKey(c.getAttribute('data-date')); renderRecord(); });
   });
   document.querySelectorAll('.day-summary-row').forEach(r=>{
@@ -859,12 +1063,18 @@ function bindRecordLogEvents(){
   });
   const prev=document.getElementById('log-prev-month');
   const next=document.getElementById('log-next-month');
+  const todayBtn=document.getElementById('log-today-btn');
   if(prev) prev.addEventListener('click', ()=>{
     logMonthCursor=new Date(logMonthCursor.getFullYear(), logMonthCursor.getMonth()-1, 1);
     renderRecord();
   });
   if(next) next.addEventListener('click', ()=>{
     logMonthCursor=new Date(logMonthCursor.getFullYear(), logMonthCursor.getMonth()+1, 1);
+    renderRecord();
+  });
+  if(todayBtn) todayBtn.addEventListener('click', ()=>{
+    logSelectedDate=nowDate();
+    logMonthCursor=new Date(nowDate().getFullYear(), nowDate().getMonth(), 1);
     renderRecord();
   });
 }
@@ -1005,7 +1215,75 @@ function bindHealthCardEvents(info){
   }
 }
 
-/* ================= 마이페이지 ================= */
+/* ================= 불편한 점(부작용) 기록 · 사용 방법 ================= */
+const SYMPTOMS=['어지러움','속쓰림','메스꺼움','졸림','두통','가려움·발진','기타'];
+let sideEffectDraft={symptom:null, slot:null};
+const MANUAL_CARDS=[
+  {icon:'💊',title:'약 등록하기',desc:'홈 아래 "약·알람 등록하기"를 눌러 약 이름과 먹는 시간을 골라 주세요.'},
+  {icon:'✅',title:'약 먹었다고 체크하기',desc:'복약체크에서 "복용함", "건너뜀", "나중에" 중 하나를 눌러 주세요.'},
+  {icon:'🔔',title:'알림 받기',desc:'설정 > 복약 알림 설정에서 푸시 알림을 켜고, 브라우저 메뉴에서 "홈 화면에 추가"를 해 주세요.'},
+  {icon:'🗂️',title:'기록 보기',desc:'아래 "기록"에서 달력의 날짜를 누르면 그날 약을 드셨는지 볼 수 있어요.'},
+  {icon:'😣',title:'불편한 점 기록하기',desc:'약 먹고 어지러우면 홈의 "불편한 점" 버튼을 눌러 증상을 골라 남기세요.'},
+  {icon:'🔤',title:'글자 크기 키우기',desc:'설정 > 글자 크기 설정에서 "크게" 또는 "아주크게"를 눌러 주세요.'},
+];
+function sideEffectDayHTML(key){
+  const list=state.sideEffects.filter(x=>x.date===key);
+  if(!list.length) return '';
+  return `<div class="day-detail-title" style="margin-top:14px;">😣 불편했던 점</div>`+list.map(sideEffectRowHTML).join('');
+}
+function sideEffectRowHTML(x){
+  const txt = x.symptom==='기타' && x.other ? `기타 · ${escapeHtml(x.other)}` : escapeHtml(x.symptom);
+  const sl=slotLabelByKey(x.slot);
+  const d=parseDateKey(x.date);
+  return `<div class="se-row"><div class="se-main"><b>${txt}</b><span>${d.getMonth()+1}월 ${d.getDate()}일 · ${sl} 약</span></div><button class="se-del" type="button" data-se-del="${x.id}">삭제</button></div>`;
+}
+function sideEffectListHTML(n){
+  const list=state.sideEffects.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,n);
+  return list.length ? list.map(sideEffectRowHTML).join('') : `<div class="hint-text" style="margin:0;">아직 기록이 없어요.</div>`;
+}
+function escapeHtml(t){ return String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function bindSideEffectEvents(){
+  document.querySelectorAll('#se-slots [data-se-slot]').forEach(b=>b.addEventListener('click',()=>{
+    sideEffectDraft.slot=b.getAttribute('data-se-slot');
+    document.querySelectorAll('#se-slots [data-se-slot]').forEach(x=>x.classList.toggle('checked',x===b));
+  }));
+  document.querySelectorAll('#se-symptoms .symptom-chip').forEach(b=>b.addEventListener('click',()=>{
+    sideEffectDraft.symptom=b.getAttribute('data-sym');
+    document.querySelectorAll('#se-symptoms .symptom-chip').forEach(x=>x.classList.toggle('on',x===b));
+    document.getElementById('se-other-wrap').style.display = sideEffectDraft.symptom==='기타' ? '' : 'none';
+  }));
+  document.getElementById('se-save').addEventListener('click',()=>{
+    if(!sideEffectDraft.symptom){ toast('불편한 점을 하나 골라 주세요.'); return; }
+    let other='';
+    if(sideEffectDraft.symptom==='기타'){
+      other=document.getElementById('se-other').value.trim().slice(0,100);
+      if(!other){ toast('어떤 점인지 적어 주세요.'); return; }
+    }
+    state.sideEffects.push({ id:'se_'+Date.now()+'_'+Math.floor(Math.random()*1000), date:dateKey(nowDate()), slot:sideEffectDraft.slot, symptom:sideEffectDraft.symptom, other, createdAt:nowDate().toISOString() });
+    saveState();
+    toast('불편한 점을 기록했어요.');
+    openDetail('sideeffect');
+    if(currentTab==='record') renderRecord();
+  });
+  document.querySelectorAll('#se-list [data-se-del]').forEach(b=>b.addEventListener('click',()=>deleteSideEffect(b.getAttribute('data-se-del'))));
+}
+function deleteSideEffect(id){
+  state.sideEffects=state.sideEffects.filter(x=>x.id!==id);
+  saveState();
+  toast('기록을 삭제했어요.');
+  if(currentDetail==='sideeffect') openDetail('sideeffect');
+  if(currentTab==='record') renderRecord();
+}
+function markManualSeen(){ if(!state.manualSeen){ state.manualSeen=true; saveState(); } }
+function maybeShowFirstRun(){
+  if(state.manualSeen) return;
+  const sh=document.getElementById('firstrun-sheet');
+  sh.classList.add('show');
+  document.getElementById('firstrun-open').onclick=()=>{ sh.classList.remove('show'); markManualSeen(); openDetail('manual'); };
+  document.getElementById('firstrun-skip').onclick=()=>{ sh.classList.remove('show'); markManualSeen(); };
+}
+
+/* ================= 설정 ================= */
 function renderMypage(){
   document.getElementById('profile-card-btn').innerHTML=`
     <div class="profile-avatar">🧓</div>
@@ -1025,6 +1303,7 @@ function renderMypage(){
     {icon:'💊',label:'복약 정보 관리',key:'meds'},
     {icon:'👪',label:'보호자 연동',key:'caregiver'},
     {icon:'🔤',label:'글자 크기 설정',key:'fontsize'},
+    {icon:'📖',label:'앱 사용 방법',key:'manual'},
     {icon:'ℹ️',label:'앱 정보',key:'appinfo'},
   ];
   document.getElementById('mypage-menu').innerHTML=menu.map(m=>`
@@ -1041,9 +1320,10 @@ function renderMypage(){
 /* ================= DETAIL OVERLAY ================= */
 function openDetail(type){
   currentDetail=type;
+  if(type!=='meds') editingMedId=null;
   const titles={
     alert:'복약 알림 설정', meds:'복약 정보 관리', caregiver:'보호자 연동',
-    fontsize:'글자 크기 설정', appinfo:'앱 정보', profile:'개인정보 보기', notifications:'알림',
+    fontsize:'글자 크기 설정', appinfo:'앱 정보', manual:'앱 사용 방법', sideeffect:'불편한 점 기록', profile:'개인정보 보기', notifications:'알림',
   };
   document.getElementById('detail-title').textContent=titles[type]||'';
   document.getElementById('detail-body').innerHTML = detailBodyHTML(type);
@@ -1070,7 +1350,12 @@ function detailBodyHTML(type){
         <p class="hint-text" id="push-status-text">${pushEnabled ? '✅ 이 기기는 푸시 알림을 받도록 설정되어 있어요.' : '아직 푸시 알림이 꺼져 있어요. 위 버튼을 눌러 켜주세요.'}</p>
       </div>
       <div class="menu-group" style="margin-top:6px;">
-        <div class="toggle-row"><span>🔊 복용 시간에 음성으로 알려드려요 (앱을 보고 있을 때)</span>${switchHTML('set-sound',state.soundAlert)}</div>
+        <div class="toggle-row"><span>🔔 차임벨 소리</span>${switchHTML('set-sound',state.soundAlert)}</div>
+        <div class="toggle-row"><span>🔊 음성 복약 알림 ("약 먹을 시간입니다")</span>${switchHTML('set-voice',state.voiceReminderEnabled)}</div>
+      </div>
+      <div class="card pad-md">
+        <span class="hint-text" style="margin-top:0;">끄면 음성 안내만 나오지 않고, 차임벨 소리·화면 알림·푸시 알림은 그대로 유지돼요.</span>
+        <button class="btn-outline" id="preview-voice-btn" style="margin-top:10px;">🔊 음성 알림 테스트</button>
       </div>
       <div class="card pad-md">
         <p class="arc-card-title" style="margin-bottom:10px;">복약 알림 이름 · 시간</p>
@@ -1084,26 +1369,30 @@ function detailBodyHTML(type){
             <input type="time" data-idx="${i}" class="set-time" value="${state.times[i]}">
           </div>
         `).join('')}
-        <button class="btn-outline" id="preview-voice-btn">🔊 음성 알림 미리 듣기</button>
       </div>
       <div class="menu-group">
         <div class="toggle-row"><span>⏰ 복약 10분 전 미리 알림</span>${switchHTML('set-pre-reminder',state.preReminderEnabled)}</div>
         <div class="toggle-row"><span>🔁 놓치면 5분마다 다시 알림</span>${switchHTML('set-repeat-alarm',state.repeatAlarmEnabled)}</div>
       </div>
-      <p class="hint-text">푸시 알림을 켜두면 앱을 닫아도 알려드리고, 꺼두면 앱을 열어둔 동안에만 소리·음성으로 알려드려요.</p>`;
+      <p class="hint-text">앱이 켜져 있을 때는 소리+음성이 바로 나와요. 앱을 닫아둔 상태에서는 푸시 알림(글자 안내)은 켜져 있으면 항상 오지만, 음성은 "알림을 탭해서 앱을 열 때" 확실하게 들려요. 화면이 완전히 꺼진 상태에서 탭 없이 자동으로 음성만 나오는 것은 iOS/Android 공통으로 웹 기술상 불가능해요.</p>`;
   }
   if(type==='meds'){
+    const editingMed = editingMedId ? state.medications.find(m=>m.id===editingMedId) : null;
     return `
       <div class="card pad-md" id="med-list">${medListHTML()}</div>
       <div class="card pad-md">
-        <p class="arc-card-title" style="margin-bottom:10px;">약 추가하기</p>
-        <div class="field"><label>약 이름</label><input type="text" id="new-med-name" placeholder="예: 혈압약"></div>
-        <div class="field"><label>복용 시간대 (하나 이상 선택)</label>
-          <div class="tag-row" id="new-med-slots">${state.slots.map(s=>`<label class="tag-check"><input type="checkbox" value="${s.key}">${s.icon} ${s.label}</label>`).join('')}</div>
+        <p class="arc-card-title" style="margin-bottom:10px;">${editingMed ? '약 수정하기' : '약 추가하기'}</p>
+        <div class="field"><label>약 이름</label><input type="text" id="new-med-name" placeholder="예: 혈압약" value="${editingMed?editingMed.name:''}"></div>
+        <div class="field"><label>복용 시간대 (하나 이상 선택 - 눌러서 선택/해제)</label>
+          <div class="tag-row" id="new-med-slots">${state.slots.map(s=>{
+            const sel = editingMed ? editingMed.slots.includes(s.key) : false;
+            return `<button type="button" class="tag-check ${sel?'checked':''}" data-slot="${s.key}">${s.icon} ${s.label}</button>`;
+          }).join('')}</div>
         </div>
-        <div class="field"><label>처방받은 날짜</label><input type="date" id="new-med-date"></div>
-        <div class="field"><label>총 처방일수</label><input type="number" id="new-med-total" min="1" placeholder="예: 30"></div>
-        <button class="btn-primary" id="add-med-btn">+ 약 추가하기</button>
+        <div class="field"><label>처방받은 날짜</label><input type="date" id="new-med-date" value="${editingMed?editingMed.prescriptionDate:''}"></div>
+        <div class="field"><label>총 처방일수</label><input type="number" id="new-med-total" min="1" placeholder="예: 30" value="${editingMed?editingMed.totalDays:''}"></div>
+        <button class="btn-primary" id="add-med-btn">${editingMed ? '수정 완료' : '+ 약 추가하기'}</button>
+        ${editingMed ? `<button class="btn-outline" id="cancel-edit-med-btn" style="margin-top:8px;">취소</button>` : ''}
       </div>`;
   }
   if(type==='caregiver'){
@@ -1124,6 +1413,34 @@ function detailBodyHTML(type){
           <button data-size="23" class="${state.fontSize===23?'active':''}">아주크게</button>
         </div>
       </div>`;
+  }
+  if(type==='sideeffect'){
+    const slots=activeSlots();
+    const defSlot=(currentActiveSlot()||slots[0]||state.slots[0]).key;
+    sideEffectDraft={symptom:null, slot:defSlot};
+    const slotChips=(slots.length?slots:state.slots).map(sl=>`<button type="button" class="tag-check ${sl.key===defSlot?'checked':''}" data-se-slot="${sl.key}" style="min-height:52px;">${sl.icon} ${sl.label}</button>`).join('');
+    const syms=SYMPTOMS.map(x=>`<button type="button" class="symptom-chip" data-sym="${x}">${x}</button>`).join('');
+    return `
+      <div class="card pad-md">
+        <p class="arc-card-title" style="margin-bottom:6px;">어느 약을 드신 후인가요?</p>
+        <div class="tag-row" id="se-slots">${slotChips}</div>
+        <p class="arc-card-title" style="margin:16px 0 0;">어떤 점이 불편하셨나요?</p>
+        <div class="symptom-grid" id="se-symptoms">${syms}</div>
+        <div class="field" id="se-other-wrap" style="display:none;">
+          <label>직접 적어주세요 (100자까지)</label>
+          <input type="text" id="se-other" maxlength="100" placeholder="예: 입이 마르고 손이 떨려요">
+        </div>
+        <button class="btn-primary" id="se-save" type="button">기록하기</button>
+        <p class="hint-text">심하거나 걱정되면 병원·약사님께 상담하세요.</p>
+      </div>
+      <div class="card pad-md">
+        <p class="arc-card-title" style="margin-bottom:4px;">최근 기록</p>
+        <div id="se-list">${sideEffectListHTML(8)}</div>
+      </div>`;
+  }
+  if(type==='manual'){
+    const cards=MANUAL_CARDS.map((c,i)=>`<div class="manual-card"><span class="mn">${i+1} / ${MANUAL_CARDS.length}</span><span class="mi">${c.icon}</span><h3>${c.title}</h3><p>${c.desc}</p></div>`).join('');
+    return `<div style="padding-top:8px;">${cards}<button class="btn-primary" id="manual-close" type="button">알겠어요</button></div>`;
   }
   if(type==='appinfo'){
     return `
@@ -1166,11 +1483,17 @@ function medListHTML(){
         <span>하루 ${m.slots.length}회 · ${slotLabels} · 처방일 ${m.prescriptionDate} · 총 ${m.totalDays}일분</span>
         <span class="remain ${remain<=5?'warn':''}">${remain>0?`${remain}일 후 소진`:'이미 소진되었어요'}</span>
       </div>
+      <button class="btn-outline" style="min-height:38px; padding:0 14px; flex-shrink:0;" data-edit-med-id="${m.id}">수정</button>
       <button class="remove-btn" data-med-id="${m.id}">✕</button>
     </div>`;
   }).join('');
 }
 function bindDetailEvents(type){
+  if(type==='sideeffect') bindSideEffectEvents();
+  if(type==='manual'){
+    markManualSeen();
+    const mc=document.getElementById('manual-close'); if(mc) mc.onclick=closeDetail;
+  }
   if(type==='alert'){
     const pushBtn=document.getElementById('push-toggle-btn');
     if(pushBtn){
@@ -1180,7 +1503,8 @@ function bindDetailEvents(type){
         openDetail('alert');
       });
     }
-    document.getElementById('set-sound').addEventListener('change', e=>{ state.soundAlert=e.target.checked; toast(state.soundAlert?'음성 알림을 켰어요.':'음성 알림을 껐어요.'); saveState(); });
+    document.getElementById('set-sound').addEventListener('change', e=>{ state.soundAlert=e.target.checked; toast(state.soundAlert?'차임벨 소리를 켰어요.':'차임벨 소리를 껐어요.'); saveState(); });
+    document.getElementById('set-voice').addEventListener('change', e=>{ state.voiceReminderEnabled=e.target.checked; toast(state.voiceReminderEnabled?'음성 복약 알림을 켰어요.':'음성 복약 알림을 껐어요.'); saveState(); });
     document.querySelectorAll('.set-time').forEach(inp=>{
       inp.addEventListener('change', e=>{
         state.times[Number(e.target.getAttribute('data-idx'))]=e.target.value;
@@ -1208,25 +1532,51 @@ function bindDetailEvents(type){
     document.getElementById('set-repeat-alarm').addEventListener('change', e=>{ state.repeatAlarmEnabled=e.target.checked; syncPushConfig(); saveState(); });
   }
   if(type==='meds'){
+    document.querySelectorAll('#new-med-slots .tag-check').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ btn.classList.toggle('checked'); });
+    });
     document.querySelectorAll('.remove-btn').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        state.medications=state.medications.filter(m=>m.id!==btn.getAttribute('data-med-id'));
+        const id=btn.getAttribute('data-med-id');
+        state.medications=state.medications.filter(m=>m.id!==id);
+        if(editingMedId===id) editingMedId=null;
         toast('약을 삭제했어요.');
+        syncPushConfig();
         renderAll();
         openDetail('meds');
       });
     });
+    document.querySelectorAll('[data-edit-med-id]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        editingMedId=btn.getAttribute('data-edit-med-id');
+        openDetail('meds');
+      });
+    });
+    const cancelBtn=document.getElementById('cancel-edit-med-btn');
+    if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ editingMedId=null; openDetail('meds'); });
+
     document.getElementById('add-med-btn').addEventListener('click', ()=>{
       const name=document.getElementById('new-med-name').value.trim();
-      const checked=Array.from(document.querySelectorAll('#new-med-slots input:checked')).map(i=>i.value);
+      const checked=Array.from(document.querySelectorAll('#new-med-slots .tag-check.checked')).map(b=>b.getAttribute('data-slot'));
       const date=document.getElementById('new-med-date').value;
       const total=Number(document.getElementById('new-med-total').value);
       if(!name){ toast('약 이름을 입력해 주세요.'); return; }
       if(!checked.length){ toast('복용 시간대를 하나 이상 선택해 주세요.'); return; }
       if(!date){ toast('처방받은 날짜를 입력해 주세요.'); return; }
       if(!total||total<=0){ toast('총 처방일수를 입력해 주세요.'); return; }
-      state.medications.push({id:'m'+(state.medIdSeq++), name, dose:'1정', slots:checked, prescriptionDate:date, totalDays:total});
-      toast(`${name}을(를) 추가했어요.`);
+
+      if(editingMedId){
+        const med=state.medications.find(m=>m.id===editingMedId);
+        if(med){
+          med.name=name; med.slots=checked; med.prescriptionDate=date; med.totalDays=total;
+          toast(`${name} 정보를 수정했어요.`);
+        }
+        editingMedId=null;
+      } else {
+        state.medications.push({id:'m'+(state.medIdSeq++), name, dose:'1정', slots:checked, prescriptionDate:date, totalDays:total});
+        toast(`${name}을(를) 추가했어요.`);
+      }
+      syncPushConfig();
       renderAll();
       openDetail('meds');
     });
@@ -1300,37 +1650,163 @@ function alarmTick(){
   const curMin=nowMinutes(now);
   const hh=pad2(now.getHours()), mm=pad2(now.getMinutes());
   rolloverIfNeeded();
-  state.slots.forEach((slot,i)=>{
+  activeSlots().forEach((slot)=>{
+    const i=slotIndex(slot);
     const slotMin=timeToMinutes(state.times[i]);
-    if(state.preReminderEnabled && !slot.taken && curMin===slotMin-state.preReminderOffset){
+    const elapsed=curMin-slotMin;
+
+    // 사전 알림 (선택지 없이 안내만)
+    if(state.preReminderEnabled && !slot.taken && !slot.skipped && curMin===slotMin-state.preReminderOffset){
       const key=`pre_${slot.key}_${hh}:${mm}`;
-      if(!state.alarmedSlots.has(key)){ state.alarmedSlots.add(key); fireAlarm(`${slot.label} 약 먹을 시간이 곧 다가와요. 미리 준비해 주세요.`); }
+      if(!state.alarmedSlots.has(key)){
+        state.alarmedSlots.add(key);
+        fireAlarm(`${slot.label} 약 먹을 시간이 곧 다가와요. 미리 준비해 주세요.`, {slotKey:slot.key, kind:'pre', withActions:false});
+      }
     }
-    if(curMin===slotMin){
+
+    // 정시 알림 - 복용함/건너뜀/나중에 3가지 선택지 제공
+    if(curMin===slotMin && !slot.taken && !slot.skipped){
       const key=`on_${slot.key}_${hh}:${mm}`;
-      if(!state.alarmedSlots.has(key)){ state.alarmedSlots.add(key); fireAlarm('약 먹을 시간입니다'); }
+      if(!state.alarmedSlots.has(key)){
+        state.alarmedSlots.add(key);
+        fireAlarm('약 먹을 시간입니다', {slotKey:slot.key, kind:'on', withActions:true});
+      }
     }
-    if(state.repeatAlarmEnabled && !slot.taken && curMin>slotMin){
-      const elapsed=curMin-slotMin;
+
+    // "나중에 복용"으로 미뤄둔 시각이 되면 한 번 더 알림 (무한반복 아님 - 한 번 울리고 스스로 정리됨)
+    if(snoozeUntilMin[slot.key]!==undefined && !slot.taken && !slot.skipped){
+      if(curMin>=snoozeUntilMin[slot.key] && elapsed<=AUTO_CLOSE_MINUTES){
+        const key=`snooze_${slot.key}_${hh}:${mm}`;
+        if(!state.alarmedSlots.has(key)){
+          state.alarmedSlots.add(key);
+          delete snoozeUntilMin[slot.key];
+          fireAlarm(`${slot.label} 약 드셨나요? 아직이면 지금 챙겨보세요.`, {slotKey:slot.key, kind:'on', withActions:true});
+        }
+      } else if(elapsed>AUTO_CLOSE_MINUTES){
+        delete snoozeUntilMin[slot.key];
+      }
+    }
+
+    // (선택) 자동 반복 알림 - 설정한 경우에만, 2시간 안에서 5분 간격·최대 3회로 제한
+    if(state.repeatAlarmEnabled && !slot.taken && !slot.skipped && curMin>slotMin && elapsed<AUTO_CLOSE_MINUTES){
       if(elapsed%5===0){
         const count=state.repeatCounts[slot.key]||0;
         const key=`rep_${slot.key}_${hh}:${mm}`;
         if(count<3 && !state.alarmedSlots.has(key)){
           state.alarmedSlots.add(key); state.repeatCounts[slot.key]=count+1;
-          fireAlarm(`${slot.label} 약을 아직 못 드셨어요. 지금 챙겨보세요.`);
+          fireAlarm(`${slot.label} 약을 아직 못 드셨어요. 지금 챙겨보세요.`, {slotKey:slot.key, kind:'rep', withActions:true});
         }
       }
+    }
+
+    // 2시간이 지나도 선택이 없으면 알림을 완전히 닫고 미복용으로 확정 (slotStatusToday가 자동으로 'missed' 처리)
+    if(!slot.taken && !slot.skipped && elapsed===AUTO_CLOSE_MINUTES){
+      closeReminderNotification(slot.key);
+      delete snoozeUntilMin[slot.key];
     }
   });
   renderAll();
 }
-function fireAlarm(text){
-  if(state.soundAlert){ playChime(); speak(text); }
+
+/* text: 음성/토스트/알림에 쓸 문구. opts.slotKey가 있으면 그 시간대 전용 알림으로 간주해
+   복용함/건너뜀/나중에 버튼(지원되는 환경에서만)을 붙이고, tag로 묶어 나중에 끌 수 있게 한다. */
+function fireAlarm(text, opts){
+  opts=opts||{};
+  if(state.soundAlert) playChime();
+  if(state.voiceReminderEnabled) speak(text);
   toast(text);
   state.notifLog.unshift({time:nowDate(), text});
+  showReminderNotification(text, opts);
+}
+function showReminderNotification(text, opts){
+  opts=opts||{};
+  const withActions = !!opts.slotKey && opts.withActions!==false;
+  const tag = opts.slotKey ? (opts.kind==='pre' ? `pre-${opts.slotKey}` : `reminder-${opts.slotKey}`) : 'onul-haenaesseoyo';
+  const notifOptions={
+    body:text, icon:'./icon-192.png', badge:'./icon-192.png',
+    tag, renotify:true, vibrate:[200,100,200],
+    data:{ slotKey: opts.slotKey||null, url:'./index.html' },
+  };
+  if(withActions){
+    notifOptions.actions=[
+      { action:'taken', title:'복용함' },
+      { action:'skip', title:'건너뜀' },
+      { action:'later', title:'나중에 복용' },
+    ];
+  }
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(reg=>{
+      reg.showNotification('오늘, 해냈어요', notifOptions).catch(()=>fallbackPlainNotification(text));
+    }).catch(()=>fallbackPlainNotification(text));
+  } else {
+    fallbackPlainNotification(text);
+  }
+}
+function fallbackPlainNotification(text){
   if('Notification' in window && Notification.permission==='granted'){
     try{ new Notification('오늘, 해냈어요', {body:text}); }catch(e){}
   }
+}
+
+/* ---------- 알림을 탭해서 앱이 열렸을 때: 즉시 음성 재생 ----------
+   Service Worker가 notificationclick에서 "./index.html?speak=...&dedupe=..."로
+   새 창을 열어주므로, 그 쿼리스트링을 읽어서 음성을 재생한다.
+   같은 알림으로 이미 재생한 적이 있으면(state.alarmedSlots) 중복 재생하지 않는다. */
+function handleSpeakFromUrlIfAny(){
+  try{
+    const params=new URLSearchParams(location.search);
+    const text=params.get('speak');
+    const dedupeKey=params.get('dedupe');
+    const action=params.get('action');
+    const slotKey=params.get('slot');
+
+    // 앱이 완전히 닫힌 상태에서 알림의 "복용함/건너뜀/나중에" 버튼을 눌러 앱이 열린 경우
+    if(action && slotKey){
+      applyMedAction(action, slotKey);
+    }
+
+    if(text){
+      const already = dedupeKey && state.alarmedSlots.has(dedupeKey);
+      if(!already){
+        if(dedupeKey) state.alarmedSlots.add(dedupeKey);
+        if(state.voiceReminderEnabled) speak(text);
+        saveState();
+      }
+    }
+    if(text || action){
+      // 새로고침해도 같은 알림이 다시 처리되지 않도록 주소에서 쿼리스트링 제거
+      history.replaceState(null, '', location.pathname);
+    }
+  }catch(e){ /* 무시 */ }
+}
+
+/* 알림의 액션 버튼(복용함/건너뜀/나중에) 처리를 한곳에 모아둔 함수 -
+   URL 파라미터 경로와 Service Worker 메시지 경로 둘 다 여기로 들어온다 */
+function applyMedAction(action, slotKey){
+  if(action==='taken') toggleSlot(slotKey);
+  else if(action==='skip') skipSlotNow(slotKey);
+  else if(action==='later') snoozeSlotNow(slotKey);
+}
+
+/* ---------- 앱이 이미 열려 있는 상태에서 서버 푸시가 도착했을 때: 즉시 음성 재생 ----------
+   화면이 꺼져 있거나 앱이 완전히 종료된 상태에서는 페이지 자체가 없으므로
+   이 메시지는 전달되지 않는다(= 그 경우는 "알림 탭 후 재생" 경로로만 가능). */
+function setupServiceWorkerMessageListener(){
+  if(!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event)=>{
+    const msg=event.data;
+    if(!msg) return;
+    if(msg.type==='voice-reminder'){
+      const already = msg.dedupeKey && state.alarmedSlots.has(msg.dedupeKey);
+      if(already) return; // 로컬 타이머(alarmTick)가 이미 같은 순간에 처리한 경우 - 중복 방지
+      if(msg.dedupeKey) state.alarmedSlots.add(msg.dedupeKey);
+      if(state.voiceReminderEnabled) speak(msg.text);
+      saveState();
+    } else if(msg.type==='med-action' && msg.slotKey && msg.action){
+      // 앱이 열려 있는 상태에서 시스템 알림의 버튼을 누른 경우 - 바로 반영
+      applyMedAction(msg.action, msg.slotKey);
+    }
+  });
 }
 
 /* ================= INIT ================= */
@@ -1338,6 +1814,9 @@ function init(){
   loadState();
   document.documentElement.style.fontSize=state.fontSize+'px';
   renderAll();
+  handleSpeakFromUrlIfAny();
+  maybeShowFirstRun();
+  setupServiceWorkerMessageListener();
   setInterval(alarmTick, 20000);
   window.addEventListener('beforeunload', saveState);
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveState(); else renderAll(); });
