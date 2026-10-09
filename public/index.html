@@ -3,15 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
-<title>오늘, 해냈어요 - 복약 알리미</title>
+<title>복약 알리미</title>
 <meta name="description" content="복약 순응도를 높이는 어르신 맞춤 복약 자가관리 앱">
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#1DB876">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="오늘, 해냈어요">
-<link rel="apple-touch-icon" href="./icon-180.png">
-<link rel="icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-title" content="복약 알리미">
+<meta name="application-name" content="복약 알리미">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" sizes="180x180" href="./icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <style>
 :root{
   --bg:#F4F6F8;
@@ -611,6 +614,20 @@ button, input{font-family:inherit;}
 .firstrun-box h3{margin:0 0 8px; font-size:1.25rem;}
 .firstrun-box p{margin:0 0 18px; font-size:1rem; color:var(--text-sub); line-height:1.5;}
 .firstrun-box button{margin-top:8px;}
+
+/* ---------- v8: 식물 키우기 / 놓친 이유 ---------- */
+.plant-card{text-align:center; background:linear-gradient(180deg,#F1FBF5 0%,#FFFFFF 100%);}
+.plant-card .plant-title{font-size:1.15rem; font-weight:800; margin:0 0 6px;}
+.plant-card svg{width:100%; max-width:220px; height:auto; display:block; margin:4px auto;}
+.plant-card .plant-main{font-size:1.3rem; font-weight:800; color:var(--primary-deep); margin:6px 0 2px;}
+.plant-card .plant-sub{font-size:1.05rem; font-weight:700; margin:2px 0;}
+.plant-card .plant-hint{font-size:1rem; color:var(--text-sub); margin:2px 0 8px;}
+.plant-dots{display:flex; justify-content:center; gap:8px; margin-top:8px;}
+.plant-dots i{width:14px; height:14px; border-radius:50%; background:#DDE2E6; display:block;}
+.plant-dots i.on{background:var(--primary);}
+.plant-done{background:var(--primary-tint); color:var(--primary-deep); border-radius:12px; padding:10px; font-weight:800; font-size:1.05rem; margin-top:8px;}
+.reason-opt{display:block; width:100%; text-align:left; min-height:56px; padding:12px 16px; margin:8px 0; border-radius:14px; border:1.5px solid var(--line); background:#fff; font-size:1.05rem; font-weight:700; cursor:pointer; color:var(--text);}
+.reason-opt.on{border-color:var(--primary); background:var(--primary-tint); color:var(--primary-deep);}
 </style>
 </head>
 <body>
@@ -620,7 +637,7 @@ button, input{font-family:inherit;}
   <div class="tab-view active" id="tab-home">
     <div class="home-topbar">
       <button class="icon-btn" id="menu-btn" aria-label="메뉴">☰</button>
-      <span class="brand-word">오늘, 해냈어요</span>
+      <span class="brand-word">복약 알리미</span>
       <button class="icon-btn" id="bell-btn" aria-label="알림">🔔<span class="badge-dot" id="bell-dot"></span></button>
     </div>
     <div class="greeting-block">
@@ -634,6 +651,8 @@ button, input{font-family:inherit;}
 
       <div class="card" id="home-arc-card"></div>
 
+      <div class="hscroll" id="home-stats"></div>
+
       <div class="card pad-md encourage-card">
         <div class="encourage-icon">🌿</div>
         <div class="encourage-text">
@@ -642,11 +661,9 @@ button, input{font-family:inherit;}
         </div>
       </div>
 
-      <div class="hscroll" id="home-stats"></div>
+      <div class="card pad-md plant-card" id="home-plant-card"></div>
 
       <button class="home-big-btn" id="home-register-btn" type="button"></button>
-
-      <div class="card pad-md" id="home-recent-card"></div>
 
       <button class="home-big-btn side" id="home-sideeffect-btn" type="button">😣 약 먹고 불편한 점이 있으셨나요?</button>
       <div class="foot-space"></div>
@@ -670,6 +687,7 @@ button, input{font-family:inherit;}
         <div class="card pad-md" id="check-med-list"></div>
         <button class="btn-primary" id="check-confirm-btn"></button>
         <div class="card pad-md" id="check-three-way" style="display:none;"></div>
+        <div id="check-miss-reason"></div>
         <div id="check-encourage-slot"></div>
       </div>
     </div>
@@ -684,18 +702,6 @@ button, input{font-family:inherit;}
         <button id="rec-seg-log">기록</button>
       </div>
       <div id="record-body"></div>
-    </div>
-  </div>
-
-  <!-- ============ 건강정보 ============ -->
-  <div class="tab-view" id="tab-health">
-    <div class="root-topbar"><span class="root-title">건강 정보</span></div>
-    <div class="tab-content">
-      <div class="chip-filter-row" id="health-filter-row"></div>
-      <div id="health-hero"></div>
-      <div id="health-cards"></div>
-      <div class="section-head" id="health-recommend-head"><h2>복약 순응도 높이는 5가지 습관</h2></div>
-      <div id="health-recommend"></div>
     </div>
   </div>
 
@@ -725,7 +731,6 @@ button, input{font-family:inherit;}
     <button class="nav-btn active" data-tab="home"><span class="icon">🏠</span>홈</button>
     <button class="nav-btn" data-tab="check"><span class="icon">✅</span>복약체크</button>
     <button class="nav-btn" data-tab="record"><span class="icon">🗂️</span>기록</button>
-    <button class="nav-btn" data-tab="health"><span class="icon">💚</span>건강정보</button>
     <button class="nav-btn" data-tab="mypage"><span class="icon">⚙️</span>설정</button>
   </nav>
 
@@ -741,11 +746,10 @@ button, input{font-family:inherit;}
   <!-- ============ DRAWER ============ -->
   <div class="drawer-backdrop" id="drawer-backdrop"></div>
   <div class="drawer" id="drawer">
-    <div class="dh">오늘, 해냈어요</div>
+    <div class="dh">복약 알리미</div>
     <div class="dlink" data-tab="home">🏠 홈</div>
     <div class="dlink" data-tab="check">✅ 복약체크</div>
     <div class="dlink" data-tab="record">🗂️ 기록</div>
-    <div class="dlink" data-tab="health">💚 건강 정보</div>
     <div class="dlink" data-tab="mypage">⚙️ 설정</div>
   </div>
 

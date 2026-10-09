@@ -1,10 +1,12 @@
-const CACHE_NAME = 'onul-haenaesseoyo-v14';
+const CACHE_NAME = 'onul-haenaesseoyo-v16';
 const APP_SHELL = [
   './index.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './icon-180.png'
+  './icon-180.png',
+  './icon-maskable-512.png',
+  './favicon-32.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -50,7 +52,7 @@ self.addEventListener('fetch', (event) => {
    3) 알림을 탭해서 앱이 열릴 때는, 열리는 주소에 음성 문구를 실어 보내
       앱이 뜨자마자 확실하게 음성이 재생되도록 한다. */
 self.addEventListener('push', (event) => {
-  let data = { title: '오늘, 해냈어요', body: '복약 시간을 확인해주세요.' };
+  let data = { title: '복약 알리미', body: '복약 시간을 확인해주세요.' };
   try {
     if (event.data) data = event.data.json();
   } catch (e) {

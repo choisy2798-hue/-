@@ -1,5 +1,5 @@
 /* =========================================================
-   오늘, 해냈어요 - 복약 알리미
+   복약 알리미
    (저장 구조: appData = { user, medications, medicationRecords, settings, reasons, meta })
 ========================================================= */
 
@@ -157,7 +157,8 @@ const state={
   repeatCounts:{},
   medIdSeq:1,
   notifLog:[],
-  medChecks:{},            // { "YYYY-MM-DD": { slotKey: { medId:true } } } - 약별 개별 복용 체크 (기존 기록 구조와 별도)
+  medChecks:{},
+  missReasons:{},          // { "YYYY-MM-DD": { slotKey: {reason, other, at} } } - 복약을 놓친 이유 (복용 완료 기록과 별도)            // { "YYYY-MM-DD": { slotKey: { medId:true } } } - 약별 개별 복용 체크 (기존 기록 구조와 별도)
   sideEffects:[],          // [{id,date,slot,symptom,other,createdAt}] - 약 먹고 불편한 점 기록 (별도 저장)
   manualSeen:false,        // 사용 방법 안내를 이미 보여줬는지
 };
@@ -279,6 +280,7 @@ function buildAppData(){
     reasons:state.slotReasons,
     consultRequested:state.consultRequested,
     medChecks:pruneMedChecks(),
+    missReasons:state.missReasons,
     sideEffects:state.sideEffects,
     manualSeen:state.manualSeen,
     meta:{
@@ -367,6 +369,7 @@ function loadState(){
     if(d.reasons && typeof d.reasons==='object') state.slotReasons=d.reasons;
     if(typeof d.consultRequested==='boolean') state.consultRequested=d.consultRequested;
     if(d.medChecks && typeof d.medChecks==='object') state.medChecks=d.medChecks;
+    if(d.missReasons && typeof d.missReasons==='object') state.missReasons=d.missReasons;
     if(Array.isArray(d.sideEffects)) state.sideEffects=d.sideEffects.filter(x=>x && typeof x==='object' && x.date);
     if(typeof d.manualSeen==='boolean') state.manualSeen=d.manualSeen;
 
@@ -449,6 +452,7 @@ function resetAllData(){
   state.notifLog=[];
   state.sideEffects=[];
   state.medChecks={};
+  state.missReasons={};
   medDraft={};
   state.manualSeen=true; // 삭제 직후 첫 실행 안내가 다시 뜨지 않게
 
@@ -650,7 +654,6 @@ function renderAll(){
   renderHome();
   renderCheck();
   if(currentTab==='record') renderRecord();
-  if(currentTab==='health') renderHealth();
   if(currentTab==='mypage') renderMypage();
   document.getElementById('bell-dot').classList.toggle('show', state.slots.some(s=>slotStatusToday(s)==='missed'));
   saveState();
@@ -682,6 +685,7 @@ function renderHome(){
   }
 
   renderDueAlerts('home-due-alerts');
+  renderPlantCard();
   const doneCount=slots.filter(s=>s.taken).length;
   const nextSlot=currentActiveSlot();
   if(slots.length===0){
@@ -726,24 +730,6 @@ function renderHomeExtras(slots){
   reg.textContent='💊 약·알람 등록하기';
   reg.className='home-big-btn'+(slots.length>0?' soft':'');
   reg.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
-
-  const card=document.getElementById('home-recent-card');
-  let rows='';
-  if(slots.length===0){
-    rows=`<div class="hint-text" style="margin:0;">약을 등록하면 복약 기록이 여기에 표시돼요.</div>`;
-  } else {
-    const n=Math.min(5,7);
-    for(let i=0;i<n;i++){
-      const d=nowDate(); d.setDate(d.getDate()-i);
-      const st=daySlotStatuses(d);
-      const done=Object.values(st).filter(v=>v==='taken').length;
-      const label = i===0 ? '오늘' : `${d.getMonth()+1}월 ${d.getDate()}일`;
-      rows+=`<div class="home-recent-row"><b>${label} (${DOW[d.getDay()]})</b><span>완료 ${done}/${slots.length}</span></div>`;
-    }
-  }
-  card.innerHTML=`<p class="arc-card-title" style="margin-bottom:4px;">📋 최근 복약 기록</p>${rows}
-    <button class="btn-outline" id="home-all-records-btn" type="button" style="margin-top:12px; min-height:56px; font-size:1.05rem;">전체 기록 보기</button>`;
-  document.getElementById('home-all-records-btn').onclick=()=>{ recordSubview='log'; switchTab('record'); };
 
   document.getElementById('home-sideeffect-btn').onclick=()=>openDetail('sideeffect');
 }
@@ -914,6 +900,7 @@ function renderCheck(){
     threeWayEl.innerHTML='';
   }
 
+  renderCheckMissReason(slot, status);
   document.getElementById('check-encourage-slot').innerHTML = status==='taken' ? `
     <div class="card pad-md encourage-card">
       <div class="encourage-icon">🌱</div>
@@ -1145,6 +1132,7 @@ function recordLogHTML(){
       <div class="med-check-main"><b>${s.label}</b><span>${state.times[slotIndex(s)]}</span></div>
       <span class="status-badge ${cls}">${label}</span>
       ${perMedRowsHTML(s, selectedKeyStr, st, isFutureSel)}
+      ${isFutureSel ? '' : missReasonRowHTML(s, selectedKeyStr, st)}
     </div>`;
   }).join('') : `<div class="hint-text" style="margin:0;">이 날짜에는 표시할 복약 기록이 없어요.</div>`;
 
@@ -1196,6 +1184,7 @@ function legendHTML(){
   </div>`;
 }
 function bindRecordLogEvents(){
+  document.querySelectorAll('#record-body [data-miss-open]').forEach(b=>b.addEventListener('click',()=>openMissReason(b.getAttribute('data-miss-open'), b.getAttribute('data-miss-slot'))));
   document.querySelectorAll('#record-body [data-rec-toggle]').forEach(b=>b.addEventListener('click',()=>{
     const on=b.getAttribute('data-rec-toggle')==='done';
     setMedDoneOnDate(b.getAttribute('data-rec-date'), b.getAttribute('data-rec-slot'), b.getAttribute('data-rec-med'), on);
@@ -1384,6 +1373,173 @@ function bindHealthCardEvents(info){
   }
 }
 
+/* ================= 나의 건강 식물 키우기 ================= */
+/* 연속 복약 일수: "그날 예정된 복약을 모두 완료한 날"이 이어진 날 수.
+   - 오늘 예정 약을 전부 완료했으면 오늘 포함(+1), 아직 진행 중이면 어제까지의 연속을 유지(끊기지 않음)
+   - 오늘 이미 놓친 시간대가 있으면 연속이 끊긴 것으로 보고 0부터 다시 시작
+   - 어제 이전은 기존 복약 기록(medicationRecords)으로 계산하므로 새로고침해도 유지된다. */
+function computePlantStreak(){
+  const slots=activeSlots();
+  let streak=0;
+  if(slots.length>0){
+    const sts=slots.map(slotStatusToday);
+    if(sts.every(x=>x==='taken')) streak=1;
+    else if(sts.some(x=>x==='missed')) return 0;
+  }
+  const cur=nowDate(); cur.setDate(cur.getDate()-1);
+  let guard=0;
+  while(guard++<400 && daySummaryStatus(cur)==='full'){ streak++; cur.setDate(cur.getDate()-1); }
+  return streak;
+}
+function plantStageFor(streak){ return Math.max(1, Math.min(7, streak)); }
+const PLANT_TITLES=['씨앗을 심었어요!','작은 싹이 났어요!','새싹이 자라고 있어요!','꽃봉오리가 생겼어요!','첫 꽃잎이 나타났어요!','꽃잎이 풍성해졌어요!','아름다운 꽃이 완성됐어요!'];
+function plantSVG(stage){
+  const petal=(cx,cy,ang,dist,rx,ry,fill)=>`<ellipse cx="${cx}" cy="${cy-dist}" rx="${rx}" ry="${ry}" fill="${fill}" stroke="#E86A92" stroke-width="1.5" transform="rotate(${ang} ${cx} ${cy})"/>`;
+  const leaf=(x,y,ang,rx,ry)=>`<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="#5CCB8A" stroke="#2E9E5B" stroke-width="1.5" transform="rotate(${ang} ${x} ${y})"/>`;
+  const stem=(top)=>`<path d="M100 165 L100 ${top}" stroke="#2E9E5B" stroke-width="6" stroke-linecap="round" fill="none"/>`;
+  let g='';
+  if(stage===1){
+    g=`<ellipse cx="100" cy="156" rx="11" ry="7" fill="#B07A3F" stroke="#8B5E3C" stroke-width="2"/><path d="M95 154 Q100 151 105 154" stroke="#D9A566" stroke-width="2" fill="none"/>`;
+  } else if(stage===2){
+    g=stem(138)+leaf(93,136,-35,7,4)+leaf(107,136,35,7,4);
+  } else if(stage===3){
+    g=stem(108)+leaf(84,130,-40,16,8)+leaf(116,122,40,16,8)+leaf(90,108,-30,10,5)+leaf(110,108,30,10,5);
+  } else if(stage===4){
+    g=stem(86)+leaf(82,134,-40,17,8)+leaf(118,124,40,17,8)+`<ellipse cx="100" cy="72" rx="13" ry="19" fill="#FF9EBB" stroke="#E86A92" stroke-width="2"/><path d="M88 84 Q100 96 112 84 Q100 90 88 84Z" fill="#3FAE6A"/>`;
+  } else if(stage===5){
+    g=stem(86)+leaf(82,134,-40,17,8)+leaf(118,124,40,17,8)+`<ellipse cx="100" cy="70" rx="11" ry="18" fill="#FFB8CE" stroke="#E86A92" stroke-width="2"/>`+petal(100,78,-55,16,10,22,'#FF8FB1')+`<path d="M88 86 Q100 98 112 86 Q100 92 88 86Z" fill="#3FAE6A"/>`;
+  } else if(stage===6){
+    g=stem(90)+leaf(80,136,-40,18,8)+leaf(120,126,40,18,8);
+    for(let k=0;k<5;k++) g+=petal(100,72,k*72,19,12,21,'#FF8FB1');
+    g+=`<circle cx="100" cy="72" r="11" fill="#FFC83D" stroke="#E0A010" stroke-width="2"/>`;
+  } else {
+    g=stem(92)+leaf(78,138,-40,19,9)+leaf(122,128,40,19,9);
+    for(let k=0;k<8;k++) g+=petal(100,68,k*45,25,13,25,k%2?'#FF8FB1':'#FFA6C2');
+    g+=`<circle cx="100" cy="68" r="15" fill="#FFC83D" stroke="#E0A010" stroke-width="2"/><circle cx="95" cy="64" r="2" fill="#B8800A"/><circle cx="105" cy="66" r="2" fill="#B8800A"/><circle cx="99" cy="73" r="2" fill="#B8800A"/>`;
+    g+=`<text x="34" y="40" font-size="16">✨</text><text x="152" y="52" font-size="14">✨</text>`;
+  }
+  return `<svg viewBox="0 0 200 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${PLANT_TITLES[stage-1]}">
+    <ellipse cx="100" cy="172" rx="74" ry="15" fill="#A47148"/><ellipse cx="100" cy="168" rx="64" ry="11" fill="#8B5E3C"/>
+    ${g}</svg>`;
+}
+function renderPlantCard(){
+  const el=document.getElementById('home-plant-card');
+  if(!el) return;
+  const streak=computePlantStreak();
+  const stage=plantStageFor(streak);
+  const left=Math.max(0,7-streak);
+  const sub = streak>0 ? `연속 복약 ${streak}일째예요!` : '오늘 약을 챙기면 식물이 자라요!';
+  const hint = stage>=7 ? '' : `꽃이 피기까지 ${left}일 남았어요!`;
+  const done = stage>=7 ? `<div class="plant-done">🎉 축하해요! 7일 연속 복약에 성공했어요!</div>` : '';
+  el.innerHTML=`<p class="plant-title">🌱 나의 건강 식물 키우기</p>
+    ${plantSVG(stage)}
+    <p class="plant-main">${PLANT_TITLES[stage-1]}</p>
+    <p class="plant-sub">${sub}</p>
+    ${hint?`<p class="plant-hint">${hint}</p>`:''}
+    ${done}
+    <div class="plant-dots" aria-hidden="true">${[1,2,3,4,5,6,7].map(i=>`<i class="${i<=stage?'on':''}"></i>`).join('')}</div>`;
+}
+
+/* ================= 복약을 놓친 이유 ================= */
+const MISS_REASONS=[
+  {key:'forgot',  label:'약 먹는 시간을 잊어버렸어요.'},
+  {key:'out',     label:'외출 중이라 약을 먹지 못했어요.'},
+  {key:'noprep',  label:'약을 준비하지 못했어요.'},
+  {key:'unwilling',label:'약을 먹고 싶지 않았어요.'},
+  {key:'symptom', label:'약을 먹은 후 불편한 증상이 있었어요.'},
+  {key:'other',   label:'기타'},
+];
+let missCtx={date:null, slot:null, reason:null};
+function getMissReason(dk, slotKey){ return (state.missReasons[dk]||{})[slotKey]||null; }
+function missReasonText(e){
+  if(!e) return '';
+  const r=MISS_REASONS.find(x=>x.key===e.reason);
+  if(e.reason==='other') return e.other ? `기타 · ${escapeHtml(e.other)}` : '기타';
+  return r ? r.label : '';
+}
+function openMissReason(dk, slotKey){
+  const ex=getMissReason(dk,slotKey);
+  missCtx={date:dk, slot:slotKey, reason: ex?ex.reason:null};
+  openDetail('missreason');
+}
+/* 이유는 날짜+시간대에 붙여 따로 저장한다. 복용 완료 기록(medicationRecords/medChecks)은 건드리지 않는다. */
+function saveMissReason(other){
+  if(!missCtx.reason) return false;
+  if(!state.missReasons[missCtx.date]) state.missReasons[missCtx.date]={};
+  state.missReasons[missCtx.date][missCtx.slot]={reason:missCtx.reason, other: missCtx.reason==='other' ? other : '', at:nowDate().toISOString()};
+  saveState();
+  return true;
+}
+function deleteMissReason(dk, slotKey){
+  if(state.missReasons[dk]){ delete state.missReasons[dk][slotKey]; if(!Object.keys(state.missReasons[dk]).length) delete state.missReasons[dk]; }
+  saveState();
+}
+function missReasonDetailHTML(){
+  const slot=state.slots.find(x=>x.key===missCtx.slot);
+  const d=parseDateKey(missCtx.date);
+  const ex=getMissReason(missCtx.date, missCtx.slot);
+  return `<div class="card pad-md">
+      <p class="arc-card-title" style="margin-bottom:4px;">${d.getMonth()+1}월 ${d.getDate()}일 ${escapeHtml(slot?slot.label:'')} 약</p>
+      <p class="hint-text" style="margin:0 0 6px;">왜 못 드셨는지 알려 주세요. (이유를 적어도 약을 드신 것으로 기록되지는 않아요.)</p>
+      <div id="mr-options">${MISS_REASONS.map(r=>`<button type="button" class="reason-opt ${missCtx.reason===r.key?'on':''}" data-mr="${r.key}">${r.label}</button>`).join('')}</div>
+      <div class="field" id="mr-other-wrap" style="display:${missCtx.reason==='other'?'':'none'};">
+        <label>직접 적어주세요 (100자까지)</label>
+        <input type="text" id="mr-other" maxlength="100" value="${ex&&ex.reason==='other'?escapeHtml(ex.other):''}" placeholder="예: 몸이 아파서 누워 있었어요">
+      </div>
+      <button class="btn-primary" id="mr-save" type="button">${ex?'수정해서 저장하기':'저장하기'}</button>
+      ${ex?`<button class="btn-outline" id="mr-delete" type="button" style="margin-top:8px;">기록 지우기</button>`:''}
+    </div>`;
+}
+function bindMissReasonEvents(){
+  document.querySelectorAll('#mr-options [data-mr]').forEach(b=>b.addEventListener('click',()=>{
+    missCtx.reason=b.getAttribute('data-mr');
+    document.querySelectorAll('#mr-options [data-mr]').forEach(x=>x.classList.toggle('on',x===b));
+    document.getElementById('mr-other-wrap').style.display = missCtx.reason==='other' ? '' : 'none';
+  }));
+  document.getElementById('mr-save').addEventListener('click',()=>{
+    if(!missCtx.reason){ toast('이유를 하나 골라 주세요.'); return; }
+    let other='';
+    if(missCtx.reason==='other'){
+      other=document.getElementById('mr-other').value.trim().slice(0,100);
+      if(!other){ toast('어떤 이유인지 적어 주세요.'); return; }
+    }
+    saveMissReason(other);
+    toast('놓친 이유를 기록했어요.');
+    closeDetail(); renderAll(); if(currentTab==='record') renderRecord();
+  });
+  const del=document.getElementById('mr-delete');
+  if(del) del.addEventListener('click',()=>{
+    deleteMissReason(missCtx.date, missCtx.slot);
+    toast('기록을 지웠어요.');
+    closeDetail(); renderAll(); if(currentTab==='record') renderRecord();
+  });
+}
+/* 복약체크 화면: 놓친 시간대에 이유 기록 카드 */
+function renderCheckMissReason(slot, status){
+  const el=document.getElementById('check-miss-reason');
+  if(!el) return;
+  if(!slot || status==='taken' || status==='pending' && !isAwaitingDecision(slot)){ el.innerHTML=''; return; }
+  const missedNow = status==='missed';
+  const tk=dateKey(nowDate());
+  const ex=getMissReason(tk, slot.key);
+  if(!missedNow && !ex){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="card pad-md" style="margin-top:12px;">
+    <p class="arc-card-title" style="margin-bottom:6px;">📝 복약을 놓친 이유</p>
+    ${ex?`<p style="margin:0 0 10px; font-size:1.02rem; font-weight:700;">${missReasonText(ex)}</p>`:`<p class="hint-text" style="margin:0 0 10px;">약을 못 드셨다면 이유를 남겨 두세요.</p>`}
+    <button class="btn-outline" id="check-miss-btn" type="button" style="min-height:56px; font-size:1.05rem;">${ex?'이유 수정하기':'놓친 이유 기록하기'}</button>
+  </div>`;
+  document.getElementById('check-miss-btn').onclick=()=>openMissReason(tk, slot.key);
+}
+/* 기록 탭 날짜 상세: 놓친 시간대의 이유 표시/수정 */
+function missReasonRowHTML(slot, key, st){
+  const ex=getMissReason(key, slot.key);
+  if(st!=='missed' && !(ex && st!=='taken')) return '';
+  return `<div style="width:100%; display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px dashed var(--line);">
+    <span style="flex:1; min-width:0; font-size:0.95rem; overflow-wrap:anywhere;">📝 ${ex?missReasonText(ex):'놓친 이유 없음'}</span>
+    <button type="button" class="se-del" style="min-width:84px; color:var(--primary-deep);" data-miss-open="${key}" data-miss-slot="${slot.key}">${ex?'이유 수정':'이유 기록'}</button>
+  </div>`;
+}
+
 /* ================= 불편한 점(부작용) 기록 · 사용 방법 ================= */
 const SYMPTOMS=['어지러움','속쓰림','메스꺼움','졸림','두통','가려움·발진','기타'];
 let sideEffectDraft={symptom:null, slot:null};
@@ -1494,7 +1650,7 @@ function openDetail(type){
   currentDetail=type;
   if(!wasMeds && type!=='manage') editingMedId=null;
   const titles={
-    manage:'복약 관리', caregiver:'보호자 연동',
+    manage:'복약 관리', missreason:'놓친 이유 기록', caregiver:'보호자 연동',
     fontsize:'글자 크기 설정', manual:'앱 사용 방법', sideeffect:'불편한 점 기록', profile:'개인정보 보기', notifications:'알림',
   };
   document.getElementById('detail-title').textContent=titles[type]||'';
@@ -1511,6 +1667,7 @@ function switchHTML(id, checked){
   return `<label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="track"></span><span class="thumb"></span></label>`;
 }
 function detailBodyHTML(type){
+  if(type==='missreason') return missReasonDetailHTML();
   if(type==='manage'){
     return `<p class="arc-card-title" style="margin:6px 2px 8px;">💊 복약 정보 관리</p>`+detailBodyHTML('meds')
       +`<p class="arc-card-title" style="margin:22px 2px 8px;">🔔 복약 알림 설정</p>`+detailBodyHTML('alert');
@@ -1658,6 +1815,7 @@ function medListHTML(){
   }).join('');
 }
 function bindDetailEvents(type){
+  if(type==='missreason'){ bindMissReasonEvents(); return; }
   if(type==='manage'){ bindDetailEvents('meds'); bindDetailEvents('alert'); return; }
   if(type==='sideeffect') bindSideEffectEvents();
   if(type==='manual'){
@@ -1756,7 +1914,7 @@ function bindDetailEvents(type){
     document.getElementById('notif-permission-btn').addEventListener('click', ()=>{
       if(!('Notification' in window)){ toast('이 기기에서는 알림 기능을 지원하지 않아요.'); return; }
       Notification.requestPermission().then(perm=>{
-        if(perm==='granted'){ new Notification('오늘, 해냈어요', {body:'알림이 잘 설정되었어요!'}); toast('이 기기로 알림을 받을 수 있어요.'); }
+        if(perm==='granted'){ new Notification('복약 알리미', {body:'알림이 잘 설정되었어요!'}); toast('이 기기로 알림을 받을 수 있어요.'); }
         else toast('알림 권한이 허용되지 않았어요.');
       });
     });
@@ -1792,7 +1950,6 @@ function switchTab(tab){
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.getAttribute('data-tab')===tab));
   closeDrawer();
   if(tab==='record') renderRecord();
-  if(tab==='health') renderHealth();
   if(tab==='mypage') renderMypage();
   window.scrollTo(0,0);
 }
@@ -1905,7 +2062,7 @@ function showReminderNotification(text, opts){
   }
   if('serviceWorker' in navigator){
     navigator.serviceWorker.ready.then(reg=>{
-      reg.showNotification('오늘, 해냈어요', notifOptions).catch(()=>fallbackPlainNotification(text));
+      reg.showNotification('복약 알리미', notifOptions).catch(()=>fallbackPlainNotification(text));
     }).catch(()=>fallbackPlainNotification(text));
   } else {
     fallbackPlainNotification(text);
@@ -1913,7 +2070,7 @@ function showReminderNotification(text, opts){
 }
 function fallbackPlainNotification(text){
   if('Notification' in window && Notification.permission==='granted'){
-    try{ new Notification('오늘, 해냈어요', {body:text}); }catch(e){}
+    try{ new Notification('복약 알리미', {body:text}); }catch(e){}
   }
 }
 
