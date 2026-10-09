@@ -1,4 +1,4 @@
-const CACHE_NAME = 'onul-haenaesseoyo-v17';
+const CACHE_NAME = 'onul-haenaesseoyo-v18';
 const APP_SHELL = [
   './index.html',
   './manifest.json',

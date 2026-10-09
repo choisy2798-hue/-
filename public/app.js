@@ -1448,31 +1448,52 @@ function renderPlantCard(){
 
 /* ================= 복약을 놓친 이유 ================= */
 const MISS_REASONS=[
-  {key:'forgot',  label:'약 먹는 시간을 잊어버렸어요.'},
-  {key:'out',     label:'외출 중이라 약을 먹지 못했어요.'},
-  {key:'noprep',  label:'약을 준비하지 못했어요.'},
-  {key:'unwilling',label:'약을 먹고 싶지 않았어요.'},
-  {key:'symptom', label:'약을 먹은 후 불편한 증상이 있었어요.'},
-  {key:'other',   label:'기타'},
+  {key:'forgot_time', label:'약 먹는 시간을 잊어버려서'},
+  {key:'unsure_time', label:'약을 먹어야 하는 시간을 정확히 기억하지 못해서'},
+  {key:'busy',        label:'외출이나 일정 때문에 약을 챙기지 못해서'},
+  {key:'bother',      label:'약을 먹는 것이 귀찮거나 번거로워서'},
+  {key:'discomfort',  label:'약을 먹으면 속이 불편하거나 부작용이 있어서'},
+  {key:'complex',     label:'약의 종류가 많아 복용하기 복잡해서'},
+  {key:'noneed',      label:'약을 먹어야 하는 필요성을 크게 느끼지 못해서'},
+  {key:'prepare',     label:'약을 준비하거나 꺼내는 것이 불편해서'},
+  {key:'other',       label:'기타 (직접 입력)'},
 ];
-let missCtx={date:null, slot:null, reason:null};
-function getMissReason(dk, slotKey){ return (state.missReasons[dk]||{})[slotKey]||null; }
-function missReasonText(e){
-  if(!e) return '';
-  const r=MISS_REASONS.find(x=>x.key===e.reason);
-  if(e.reason==='other') return e.other ? `기타 · ${escapeHtml(e.other)}` : '기타';
-  return r ? r.label : '';
+const MISS_QUESTION='약을 정해진 시간에 복용하지 못한 이유는 무엇인가요?';
+const LEGACY_MISS={forgot:'forgot_time', out:'busy', noprep:'prepare', unwilling:'bother', symptom:'discomfort', other:'other'};
+let missCtx={date:null, slot:null, reasons:[]};
+/* 예전 기록(reason 한 개)도 읽을 수 있게 reasons 배열로 맞춰서 돌려준다 */
+function normMiss(e){
+  if(!e) return null;
+  let rs=Array.isArray(e.reasons)? e.reasons.slice() : (e.reason? [LEGACY_MISS[e.reason]||e.reason] : []);
+  rs=rs.filter(k=>MISS_REASONS.some(r=>r.key===k));
+  return Object.assign({}, e, {reasons:rs});
 }
+function getMissReason(dk, slotKey){ const e=normMiss((state.missReasons[dk]||{})[slotKey]); return e&&e.reasons.length ? e : null; }
+function missReasonList(e){
+  if(!e) return [];
+  return e.reasons.map(k=>{
+    if(k==='other') return e.other ? `기타 · ${escapeHtml(e.other)}` : '기타';
+    const r=MISS_REASONS.find(x=>x.key===k); return r?r.label:'';
+  }).filter(Boolean);
+}
+function missReasonText(e){ return missReasonList(e).join(' / '); }
 function openMissReason(dk, slotKey){
   const ex=getMissReason(dk,slotKey);
-  missCtx={date:dk, slot:slotKey, reason: ex?ex.reason:null};
+  missCtx={date:dk, slot:slotKey, reasons: ex?ex.reasons.slice():[]};
   openDetail('missreason');
 }
-/* 이유는 날짜+시간대에 붙여 따로 저장한다. 복용 완료 기록(medicationRecords/medChecks)은 건드리지 않는다. */
+/* 이유는 날짜+시간대(+그 시간대의 약 이름·예정 시간)에 붙여 따로 저장한다. 복용 완료 기록(medicationRecords/medChecks)은 건드리지 않는다. */
 function saveMissReason(other){
-  if(!missCtx.reason) return false;
+  if(!missCtx.reasons.length) return false;
+  const slot=state.slots.find(x=>x.key===missCtx.slot);
+  let meds=[]; try{ meds=slotMeds(missCtx.slot).map(m=>m.name); }catch(e){}
   if(!state.missReasons[missCtx.date]) state.missReasons[missCtx.date]={};
-  state.missReasons[missCtx.date][missCtx.slot]={reason:missCtx.reason, other: missCtx.reason==='other' ? other : '', at:nowDate().toISOString()};
+  state.missReasons[missCtx.date][missCtx.slot]={
+    reasons:missCtx.reasons.slice(),
+    other: missCtx.reasons.includes('other') ? other : '',
+    meds, time: slot ? state.times[slotIndex(slot)] : '',
+    at:nowDate().toISOString()
+  };
   saveState();
   return true;
 }
@@ -1484,13 +1505,17 @@ function missReasonDetailHTML(){
   const slot=state.slots.find(x=>x.key===missCtx.slot);
   const d=parseDateKey(missCtx.date);
   const ex=getMissReason(missCtx.date, missCtx.slot);
+  let meds=[]; try{ meds=slotMeds(missCtx.slot).map(m=>m.name); }catch(e){}
+  const tm=slot? state.times[slotIndex(slot)] : '';
   return `<div class="card pad-md">
-      <p class="arc-card-title" style="margin-bottom:4px;">${d.getMonth()+1}월 ${d.getDate()}일 ${escapeHtml(slot?slot.label:'')} 약</p>
-      <p class="hint-text" style="margin:0 0 6px;">왜 못 드셨는지 알려 주세요. (이유를 적어도 약을 드신 것으로 기록되지는 않아요.)</p>
-      <div id="mr-options">${MISS_REASONS.map(r=>`<button type="button" class="reason-opt ${missCtx.reason===r.key?'on':''}" data-mr="${r.key}">${r.label}</button>`).join('')}</div>
-      <div class="field" id="mr-other-wrap" style="display:${missCtx.reason==='other'?'':'none'};">
+      <p class="arc-card-title" style="margin-bottom:4px;">${d.getMonth()+1}월 ${d.getDate()}일 ${escapeHtml(slot?slot.label:'')} ${tm?escapeHtml(tm)+' ':''}약</p>
+      ${meds.length?`<p class="hint-text" style="margin:0 0 6px;">💊 ${meds.map(escapeHtml).join(', ')}</p>`:''}
+      <p style="margin:8px 0 2px; font-size:1.15rem; font-weight:800; line-height:1.5;">${MISS_QUESTION}</p>
+      <p class="hint-text" style="margin:0 0 6px;">해당하는 것을 모두 골라 주세요. (이유를 적어도 약을 드신 것으로 기록되지는 않아요.)</p>
+      <div id="mr-options">${MISS_REASONS.map(r=>`<button type="button" role="checkbox" aria-checked="${missCtx.reasons.includes(r.key)}" class="reason-opt ${missCtx.reasons.includes(r.key)?'on':''}" data-mr="${r.key}"><span class="reason-box">${missCtx.reasons.includes(r.key)?'✓':''}</span><span class="reason-txt">${r.label}</span></button>`).join('')}</div>
+      <div class="field" id="mr-other-wrap" style="display:${missCtx.reasons.includes('other')?'':'none'};">
         <label>직접 적어주세요 (100자까지)</label>
-        <input type="text" id="mr-other" maxlength="100" value="${ex&&ex.reason==='other'?escapeHtml(ex.other):''}" placeholder="예: 몸이 아파서 누워 있었어요">
+        <input type="text" id="mr-other" maxlength="100" value="${ex&&ex.reasons.includes('other')?escapeHtml(ex.other||''):''}" placeholder="예: 몸이 아파서 누워 있었어요">
       </div>
       <button class="btn-primary" id="mr-save" type="button">${ex?'수정해서 저장하기':'저장하기'}</button>
       ${ex?`<button class="btn-outline" id="mr-delete" type="button" style="margin-top:8px;">기록 지우기</button>`:''}
@@ -1498,14 +1523,18 @@ function missReasonDetailHTML(){
 }
 function bindMissReasonEvents(){
   document.querySelectorAll('#mr-options [data-mr]').forEach(b=>b.addEventListener('click',()=>{
-    missCtx.reason=b.getAttribute('data-mr');
-    document.querySelectorAll('#mr-options [data-mr]').forEach(x=>x.classList.toggle('on',x===b));
-    document.getElementById('mr-other-wrap').style.display = missCtx.reason==='other' ? '' : 'none';
+    const k=b.getAttribute('data-mr');
+    const i=missCtx.reasons.indexOf(k);
+    if(i>=0) missCtx.reasons.splice(i,1); else missCtx.reasons.push(k);
+    const on=missCtx.reasons.includes(k);
+    b.classList.toggle('on',on); b.setAttribute('aria-checked',on);
+    b.querySelector('.reason-box').textContent=on?'✓':'';
+    document.getElementById('mr-other-wrap').style.display = missCtx.reasons.includes('other') ? '' : 'none';
   }));
   document.getElementById('mr-save').addEventListener('click',()=>{
-    if(!missCtx.reason){ toast('이유를 하나 골라 주세요.'); return; }
+    if(!missCtx.reasons.length){ toast('이유를 하나 이상 골라 주세요.'); return; }
     let other='';
-    if(missCtx.reason==='other'){
+    if(missCtx.reasons.includes('other')){
       other=document.getElementById('mr-other').value.trim().slice(0,100);
       if(!other){ toast('어떤 이유인지 적어 주세요.'); return; }
     }
@@ -1541,7 +1570,7 @@ function missReasonRowHTML(slot, key, st){
   const ex=getMissReason(key, slot.key);
   if(st!=='missed' && !(ex && st!=='taken')) return '';
   return `<div style="width:100%; display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px dashed var(--line);">
-    <span style="flex:1; min-width:0; font-size:0.95rem; overflow-wrap:anywhere;">📝 ${ex?missReasonText(ex):'놓친 이유 없음'}</span>
+    <span style="flex:1; min-width:0; font-size:1rem; line-height:1.5; overflow-wrap:anywhere;">📝 ${ex?missReasonText(ex):'놓친 이유 없음'}</span>
     <button type="button" class="se-del" style="min-width:84px; color:var(--primary-deep);" data-miss-open="${key}" data-miss-slot="${slot.key}">${ex?'이유 수정':'이유 기록'}</button>
   </div>`;
 }
