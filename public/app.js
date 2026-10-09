@@ -488,6 +488,37 @@ function isAwaitingDecision(slot){
   const cur=nowMinutes(nowDate());
   return cur>=t && cur<=t+AUTO_CLOSE_MINUTES;
 }
+/* 복용 예정 시간이 지났는데(2시간 안) 아직 복용함/건너뜀 선택이 없고, "나중에"로 미뤄두지도 않은 시간대들.
+   아침·점심·저녁·취침전 모두 같은 규칙으로 각각 독립 계산한다. */
+function dueSlots(){
+  const cur=nowMinutes(nowDate());
+  return activeSlots().filter(s=>{
+    if(!isAwaitingDecision(s)) return false;
+    const sn=snoozeUntilMin[s.key];
+    return !(sn!==undefined && cur<sn);
+  });
+}
+/* 미복용 알림 카드: 시간대마다 따로 "복용함 / 건너뜀 / 나중에" 버튼을 보여준다.
+   앱을 늦게 열었거나 백그라운드였어도 상태 기준으로 항상 표시된다. */
+function renderDueAlerts(containerId, excludeKey){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  const list=dueSlots().filter(s=>s.key!==excludeKey);
+  el.innerHTML=list.map(s=>`
+    <div class="card pad-md due-alert" data-due="${s.key}" style="border:1.5px solid var(--coral); background:#FFF8F6;">
+      <p class="arc-card-title" style="margin:0 0 4px; color:#C4432F;">🔔 ${s.icon} ${escapeHtml(s.label)} 약 드실 시간이 지났어요</p>
+      <p class="hint-text" style="margin:0 0 10px;">예정 시간 ${state.times[slotIndex(s)]} · 약을 드셨나요?</p>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-primary" data-due-act="taken" style="flex:1;">복용함</button>
+        <button class="btn-outline" data-due-act="skip" style="flex:1;">건너뜀</button>
+        <button class="btn-outline" data-due-act="later" style="flex:1;">나중에</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.due-alert').forEach(card=>{
+    const key=card.getAttribute('data-due');
+    card.querySelectorAll('[data-due-act]').forEach(b=>b.addEventListener('click',()=>applyMedAction(b.getAttribute('data-due-act'), key)));
+  });
+}
 function currentActiveSlot(){
   const notTaken=activeSlots().filter(s=>!s.taken);
   return notTaken.length ? notTaken[0] : null;
@@ -650,6 +681,7 @@ function renderHome(){
     pill.onclick=()=>{ checkSelectedSlot=active.key; switchTab('check'); };
   }
 
+  renderDueAlerts('home-due-alerts');
   const doneCount=slots.filter(s=>s.taken).length;
   const nextSlot=currentActiveSlot();
   if(slots.length===0){
@@ -784,6 +816,7 @@ function renderCheck(){
 
   if(slots.length===0){
     mainEl.style.display='none';
+    renderDueAlerts('check-due-alerts');
     emptyEl.style.display='';
     emptyEl.innerHTML=`
       <div class="card" style="text-align:center;">
@@ -810,6 +843,7 @@ function renderCheck(){
     chip.addEventListener('click', ()=>{ checkSelectedSlot=chip.getAttribute('data-slot'); renderCheck(); });
   });
 
+  renderDueAlerts('check-due-alerts', checkSelectedSlot);
   const slot=slots.find(s=>s.key===checkSelectedSlot);
   const i=slotIndex(slot);
   const status=slotStatusToday(slot);

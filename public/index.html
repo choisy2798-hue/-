@@ -518,7 +518,9 @@ button, input{font-family:inherit;}
 
 .med-manage-row{display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--line);}
 .med-manage-row:last-of-type{border-bottom:none;}
-.med-manage-main{flex:1;}
+.med-manage-main{flex:1 1 0; min-width:0; word-break:keep-all; overflow-wrap:anywhere;}
+.med-manage-row .btn-outline{width:auto; flex:0 0 auto; white-space:nowrap; padding:0 16px; min-height:44px;}
+.med-manage-row .remove-btn{flex:0 0 auto;}
 .med-manage-main b{font-size:0.94rem; display:block;}
 .med-manage-main span{font-size:0.78rem; color:var(--text-sub); display:block; margin-top:2px; line-height:1.4;}
 .med-manage-main .remain{font-size:0.8rem; font-weight:700; margin-top:2px;}
@@ -628,6 +630,7 @@ button, input{font-family:inherit;}
     </div>
     <div class="tab-content" style="padding-top:0;">
       <div class="status-pill-card" id="status-pill"></div>
+      <div id="home-due-alerts"></div>
 
       <div class="card" id="home-arc-card"></div>
 
@@ -658,6 +661,7 @@ button, input{font-family:inherit;}
         <b id="check-date-label" style="font-size:0.98rem;"></b>
         <span>📅</span>
       </div>
+      <div id="check-due-alerts"></div>
       <div id="check-empty-state"></div>
       <div id="check-main-content">
         <div class="slot-chip-row" id="check-slot-row"></div>
