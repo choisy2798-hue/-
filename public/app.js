@@ -840,10 +840,13 @@ function renderCheck(){
       return `<div class="med-check-row" data-med-row="${m.id}" style="${(editable&&!done)?'cursor:pointer;':''} min-height:64px; ${sel?'background:var(--primary-tint);':''}">
       <div class="med-check-icon">💊</div>
       <div class="med-check-main"><b>${escapeHtml(m.name)} ${m.dose||''}</b><span>${sub}</span></div>
-      <div class="check-circle ${(done||sel)?'on':''}" style="width:40px;height:40px;">${mark}</div>
+      ${done ? `<button type="button" class="se-del" data-cancel-med="${m.id}" style="min-width:76px;">완료 취소</button>` : `<div class="check-circle ${sel?'on':''}" style="width:40px;height:40px;">${mark}</div>`}
     </div>`;}).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 설정 > 복약 관리에서 약을 등록해보세요.</div>`;
   document.querySelectorAll('#check-med-list [data-med-row]').forEach(row=>{
     row.addEventListener('click', ()=>toggleMedDraft(slot.key, row.getAttribute('data-med-row')));
+  });
+  document.querySelectorAll('#check-med-list [data-cancel-med]').forEach(b=>{
+    b.addEventListener('click', (e)=>{ e.stopPropagation(); setMedDoneOnDate(dateKey(nowDate()), slot.key, b.getAttribute('data-cancel-med'), false); toast('복용 완료를 취소했어요.'); });
   });
 
   const btn=document.getElementById('check-confirm-btn');
@@ -867,7 +870,8 @@ function renderCheck(){
     threeWayEl.style.display='none';
     threeWayEl.innerHTML='';
     btn.style.display='';
-    if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
+    btn.className='btn-primary';
+    if(status==='taken'){ btn.className='btn-outline'; btn.textContent='복용 완료 취소'; btn.disabled=false; btn.style.background=''; btn.onclick=()=>cancelSlotToday(slot.key); }
     else if(!editable){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
     else {
       const n=draftIds.length;
@@ -875,7 +879,7 @@ function renderCheck(){
       btn.disabled = n===0;
       btn.style.background='';
     }
-    btn.onclick=()=>commitSelectedMeds(slot.key);
+    if(status!=='taken') btn.onclick=()=>commitSelectedMeds(slot.key);
   }
 
   document.getElementById('check-encourage-slot').innerHTML = status==='taken' ? `
@@ -920,8 +924,61 @@ function medDraftIds(slotKey){
   return slotMeds(slotKey).filter(m=>ids.includes(m.id) && !medCheckedToday(slotKey,m.id)).map(m=>m.id);
 }
 function slotEditable(slot){
-  if(slot.taken || slot.skipped) return false;
-  return slotStatusToday(slot)==='pending' || medCheckedCount(slot.key)>0;
+  return !slot.taken; // 시간이 지났거나 건너뛴 시간대도, 완료되기 전까지는 늦게라도 복용 완료 가능
+}
+/* ---- 날짜별 약 단위 완료/취소 (오늘 + 지난 날짜 공통) ---- */
+function checksOn(dk, slotKey){ return ((state.medChecks[dk]||{})[slotKey])||{}; }
+function medDoneOnDate(dk, slotKey, medId){
+  if(dk===dateKey(nowDate())) return medCheckedToday(slotKey, medId);
+  const ch=checksOn(dk,slotKey);
+  if(Object.keys(ch).length) return !!ch[medId];
+  return ((state.medicationRecords[dk]||{})[slotKey])==='taken'; // 약별 기록이 없던 예전 기록 = 그 시간대 전체 복용
+}
+/* 약 하나의 복용 완료(on=true) / 완료 취소(on=false). 다른 약·다른 시간대·다른 날짜는 건드리지 않는다.
+   같은 상태로 다시 호출해도 결과가 같다(중복 기록 없음). */
+function setMedDoneOnDate(dk, slotKey, medId, on){
+  const meds=slotMeds(slotKey);
+  if(!meds.some(m=>m.id===medId)) return;
+  const isToday = dk===dateKey(nowDate());
+  if(!state.medChecks[dk]) state.medChecks[dk]={};
+  let ch=state.medChecks[dk][slotKey];
+  if(!ch){
+    ch={};
+    // 약별 기록이 없던 "시간대 전체 완료" 기록은 약별로 풀어서 저장
+    const wasTaken = isToday ? (state.slots.find(x=>x.key===slotKey)||{}).taken : ((state.medicationRecords[dk]||{})[slotKey]==='taken');
+    if(wasTaken) meds.forEach(m=>{ ch[m.id]=true; });
+    state.medChecks[dk][slotKey]=ch;
+  } else if(isToday){
+    const sl=state.slots.find(x=>x.key===slotKey);
+    if(sl && sl.taken) meds.forEach(m=>{ ch[m.id]=true; });
+  }
+  if(on) ch[medId]=true; else delete ch[medId];
+  const all = meds.every(m=>ch[m.id]);
+  if(isToday){
+    const sl=state.slots.find(x=>x.key===slotKey);
+    if(medDraft[slotKey]) delete medDraft[slotKey][medId];
+    if(all){ sl.taken=true; sl.skipped=false; delete snoozeUntilMin[slotKey]; }
+    else { sl.taken=false; }
+    saveState(); renderAll();
+  } else {
+    if(!state.medicationRecords[dk]) state.medicationRecords[dk]={};
+    state.medicationRecords[dk][slotKey] = all ? 'taken' : 'missed';
+    saveState();
+    renderAll();
+    if(currentTab==='record') renderRecord();
+  }
+}
+/* 오늘 한 시간대 전체 완료 취소 */
+function cancelSlotToday(slotKey){
+  const slot=state.slots.find(x=>x.key===slotKey);
+  if(!slot || !slot.taken) return;
+  const tk=dateKey(nowDate());
+  if(!state.medChecks[tk]) state.medChecks[tk]={};
+  state.medChecks[tk][slotKey]={};
+  medDraft[slotKey]={};
+  slot.taken=false;
+  toast(`${slot.label} 복용 완료를 취소했어요.`);
+  saveState(); renderAll();
 }
 function toggleMedDraft(slotKey, medId){
   const slot=state.slots.find(s=>s.key===slotKey);
@@ -1086,14 +1143,16 @@ function perMedRowsHTML(slot, key, slotSt, isFuture){
   if(isFuture) return '';
   const meds=slotMeds(slot.key);
   if(!meds.length) return '';
-  const checks=(state.medChecks[key]||{})[slot.key]||{};
-  const anyChecked=Object.keys(checks).length>0;
-  if(meds.length<2 && !anyChecked) return '';
-  return `<div style="width:100%; padding:2px 0 4px 58px; font-size:0.92rem;">`+meds.map(m=>{
-    const done = slotSt==='taken' || !!checks[m.id];
-    const partial = Object.keys(checks).length>0;
-    const lbl = done ? '✓ 복용' : (partial ? '미확인' : (slotSt==='missed' ? '미복용' : '복약 전'));
-    return `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>💊 ${escapeHtml(m.name)}</span><b style="color:${done?'var(--primary-deep)':((slotSt==='missed'&&!partial)?'#C4432F':'var(--text-sub)')};">${lbl}</b></div>`;
+  const anyDone=meds.some(m=>medDoneOnDate(key,slot.key,m.id));
+  return `<div style="width:100%; padding:2px 0 4px 0; font-size:0.95rem;">`+meds.map(m=>{
+    const done=medDoneOnDate(key,slot.key,m.id);
+    const lbl = done ? '✓ 복용' : (anyDone ? '미확인' : (slotSt==='missed' ? '미복용' : (slotSt==='pending' ? '복약 전' : '기록 없음')));
+    const col = done ? 'var(--primary-deep)' : ((slotSt==='missed'&&!anyDone) ? '#C4432F' : 'var(--text-sub)');
+    return `<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px dashed var(--line);">
+      <span style="flex:1; min-width:0; overflow-wrap:anywhere;">💊 ${escapeHtml(m.name)}</span>
+      <b style="color:${col};">${lbl}</b>
+      <button type="button" class="se-del" style="${done?'':'color:var(--primary-deep);'} min-width:84px;" data-rec-toggle="${done?'cancel':'done'}" data-rec-date="${key}" data-rec-slot="${slot.key}" data-rec-med="${m.id}">${done?'완료 취소':'복용 완료'}</button>
+    </div>`;
   }).join('')+`</div>`;
 }
 function legendHTML(){
@@ -1105,6 +1164,11 @@ function legendHTML(){
   </div>`;
 }
 function bindRecordLogEvents(){
+  document.querySelectorAll('#record-body [data-rec-toggle]').forEach(b=>b.addEventListener('click',()=>{
+    const on=b.getAttribute('data-rec-toggle')==='done';
+    setMedDoneOnDate(b.getAttribute('data-rec-date'), b.getAttribute('data-rec-slot'), b.getAttribute('data-rec-med'), on);
+    toast(on?'복용 완료로 기록했어요.':'복용 완료를 취소했어요.');
+  }));
   document.querySelectorAll('#record-body [data-se-del]').forEach(b=>b.addEventListener('click',()=>deleteSideEffect(b.getAttribute('data-se-del'))));
   document.querySelectorAll('.chip-filter').forEach(c=>{
     c.addEventListener('click', ()=>{ logFilter=c.getAttribute('data-filter'); renderRecord(); });
