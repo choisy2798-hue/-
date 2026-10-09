@@ -1,12 +1,13 @@
-const CACHE_NAME = 'onul-haenaesseoyo-v18';
+const CACHE_NAME = 'onul-haenaesseoyo-v19';
 const APP_SHELL = [
   './index.html',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-180.png',
-  './icon-maskable-512.png',
-  './favicon-32.png'
+  './icon-192.png?v=2',
+  './icon-512.png?v=2',
+  './icon-180.png?v=2',
+  './icon-maskable-512.png?v=2',
+  './favicon-32.png?v=2',
+  './favicon-48.png?v=2'
 ];
 
 self.addEventListener('install', (event) => {
@@ -66,8 +67,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: './icon-192.png',
-    badge: './icon-192.png',
+    icon: './icon-192.png?v=2',
+    badge: './icon-192.png?v=2',
     vibrate: [200, 100, 200],
     tag: data.tag || 'onul-haenaesseoyo',
     renotify: true,

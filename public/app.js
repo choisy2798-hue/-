@@ -3,6 +3,89 @@
    (저장 구조: appData = { user, medications, medicationRecords, settings, reasons, meta })
 ========================================================= */
 
+/* ================= 7일 화분 키우기 (PlantGrowth) ================= */
+window.PlantGrowth = (function () {
+  var KEY = 'plantGrowth.v1';
+  var MSG = [
+    ['씨앗을 심었어요', '약을 챙겨 드신 날마다 한 뼘씩 자라요'],
+    ['1일째, 씨앗이 깨어났어요', '흙 속에서 힘을 모으고 있어요'],
+    ['2일째, 작은 싹이 나왔어요!', '오늘도 잘하셨어요'],
+    ['3일째, 떡잎이 펼쳐졌어요', '벌써 절반 가까이 왔어요'],
+    ['4일째, 줄기가 쑥 자랐어요', '꾸준함이 보이네요'],
+    ['5일째, 잎이 무성해졌어요', '이틀만 더 하면 꽃이 펴요'],
+    ['6일째, 꽃봉오리가 맺혔어요', '내일 약을 드시면 꽃이 활짝 펴요!'],
+    ['7일 완성! 꽃이 활짝 피었어요 🌸', '정말 대단하세요. 다음 날부터 새 씨앗을 키워요']
+  ];
+  var memory = null;
+
+  function todayStr() {
+    var d = (typeof nowDate === 'function') ? nowDate() : new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function load() {
+    try { var s = JSON.parse(localStorage.getItem(KEY)); if (s) return s; } catch (e) {}
+    return memory || { count: 0, lastDate: null, flowers: 0, undo: null };
+  }
+  function save(s) {
+    memory = s;
+    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  }
+
+  function draw(stage, s, doneToday) {
+    var card = document.getElementById('plantCard');
+    if (!card) return;
+    card.querySelectorAll('.p-part').forEach(function (el) {
+      var min = +el.dataset.min, max = el.dataset.max === undefined ? 99 : +el.dataset.max;
+      el.classList.toggle('p-off', !(stage >= min && stage <= max));
+    });
+    var dots = '';
+    for (var i = 1; i <= 7; i++) {
+      var cls = 'plant-dot' + (i <= stage ? ' on' : '') + (i === stage && doneToday ? ' today' : '');
+      dots += '<span class="' + cls + '">' + (i === 7 ? '🌸' : i) + '</span>';
+    }
+    document.getElementById('plantDots').innerHTML = dots;
+    document.getElementById('plantMsg').textContent = MSG[stage][0];
+    var sub = MSG[stage][1];
+    if (!doneToday && stage < 7) sub = '오늘 약을 다 드시면 한 뼘 더 자라요';
+    document.getElementById('plantSub').textContent = sub;
+    document.getElementById('plantFlowers').textContent = s.flowers > 0 ? '피운 꽃 🌸 ' + s.flowers + '송이' : '';
+    card.classList.toggle('bloom', stage === 7);
+  }
+
+  function render() {
+    var s = load();
+    draw(s.count, s, s.lastDate === todayStr());
+  }
+
+  /* 오늘 약을 모두 드셨을 때 호출 (하루에 한 번만 자람) */
+  function complete() {
+    var s = load(), t = todayStr();
+    if (s.lastDate === t) return;
+    s.undo = { count: s.count, lastDate: s.lastDate, flowers: s.flowers };
+    if (s.count >= 7) { s.flowers += 1; s.count = 0; }  // 꽃 핀 다음 날 → 새 씨앗
+    s.count += 1;
+    s.lastDate = t;
+    save(s); render();
+  }
+
+  /* 오늘 체크를 다시 해제했을 때 호출 */
+  function undoToday() {
+    var s = load();
+    if (s.lastDate !== todayStr() || !s.undo) return;
+    s.count = s.undo.count; s.lastDate = s.undo.lastDate; s.flowers = s.undo.flowers; s.undo = null;
+    save(s); render();
+  }
+
+  function reset() { save({ count: 0, lastDate: null, flowers: 0, undo: null }); render(); }
+  function preview(stage) { draw(stage, load(), true); }
+
+  document.addEventListener('DOMContentLoaded', render);
+  if (document.readyState !== 'loading') render();
+
+  return { complete: complete, undoToday: undoToday, render: render, reset: reset, preview: preview };
+})();
+
+
 const STORAGE_KEY = 'onulHaenaesseoyoAppData_v1';
 const LEGACY_STORAGE_KEY = 'onulHaenaesseoyoState_v1'; // 이전 버전 데이터 마이그레이션용
 const DEFAULT_LABELS = ['아침','점심','저녁','취침전'];
@@ -427,6 +510,7 @@ function resetAllData(){
   const confirmed=window.confirm('저장된 모든 복약 기록과 설정을 삭제하시겠습니까?');
   if(!confirmed) return;
   try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+  try{ PlantGrowth.reset(); localStorage.removeItem('plantGrowth.v1'); }catch(e){}
   try{ localStorage.removeItem(LEGACY_STORAGE_KEY); }catch(e){}
 
   state.name='어르신';
@@ -661,7 +745,6 @@ function renderAll(){
 
 /* ================= HOME ================= */
 function renderHome(){
-  document.getElementById('home-date').textContent=fmtDateFull(nowDate());
   document.getElementById('home-hello').textContent='안녕하세요,';
   document.getElementById('home-name').textContent=`${state.name} 어르신`;
 
@@ -686,7 +769,7 @@ function renderHome(){
   }
 
   renderDueAlerts('home-due-alerts');
-  renderPlantCard();
+  syncPlantGrowth();
   const doneCount=slots.filter(s=>s.taken).length;
   const nextSlot=currentActiveSlot();
   if(slots.length===0){
@@ -699,22 +782,17 @@ function renderHome(){
       </div>`;
     const btn=document.getElementById('home-arc-add-med-btn');
     if(btn) btn.onclick=()=>{ switchTab('mypage'); openDetail('meds'); };
-    document.getElementById('home-arc-card').onclick=null; document.getElementById('home-arc-card').style.cursor='';
   } else {
     document.getElementById('home-arc-card').innerHTML=`
       <div class="arc-card-head">
-        <div style="flex:1;">
+        <div>
           <p class="arc-card-title">오늘의 복약 현황</p>
           <p class="arc-card-sub">${nextSlot? `다음 복약 시간: ${state.times[slotIndex(nextSlot)]}` : '오늘 복약을 모두 마쳤어요'}</p>
         </div>
       </div>
-      <div class="home-ring-wrap">${ringSVG({segments:slots.map(slotStatusToday), center:`${slots.length?Math.round(doneCount/slots.length*100):0}%`, sub:'오늘 복약'})}</div>
+      <div class="arc-wrap">${buildArcSVG(slots)}</div>
       ${slotChipRowHTML(slots)}
     `;
-    const arcCard=document.getElementById('home-arc-card');
-    arcCard.querySelector('.arc-card-head').insertAdjacentHTML('beforeend','<span style="color:var(--primary-deep); font-weight:800; font-size:0.95rem;">자세히 ›</span>');
-    arcCard.style.cursor='pointer';
-    arcCard.onclick=()=>openStatDetail('day');
   }
 
   const rate=computeAdherenceRate();
@@ -1643,156 +1721,6 @@ function maybeShowFirstRun(){
   document.getElementById('firstrun-skip').onclick=()=>{ sh.classList.remove('show'); markManualSeen(); };
 }
 
-/* ================= 링(원형 진행) · 기간 선택(일/주/월/연) · 복약 상세 ================= */
-/* 원형 링: segments(['taken','missed','pending'...])를 시간대별 호로 나눠 그리거나, progress(0~100)로 한 줄 진행률을 그린다 */
-function ringSVG(o){
-  const R=44, C=2*Math.PI*R, cx=60, cy=60;
-  const col=(st)=> st==='taken' ? '#1DB876' : st==='missed' ? '#FF6F5E' : '#E3E7EA';
-  let arcs='';
-  if(Array.isArray(o.segments) && o.segments.length){
-    const n=o.segments.length, gap=n>1?6:0, seg=C/n-gap;
-    o.segments.forEach((st,i)=>{
-      arcs+=`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${col(st)}" stroke-width="13" stroke-linecap="round" stroke-dasharray="${Math.max(seg,1)} ${C-Math.max(seg,1)}" stroke-dashoffset="${-(C/n*i+gap/2)}" transform="rotate(-90 ${cx} ${cy})"/>`;
-    });
-  } else {
-    const p=Math.max(0,Math.min(100,o.progress||0));
-    arcs=`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#E3E7EA" stroke-width="13"/>`+(p>0?`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#1DB876" stroke-width="13" stroke-linecap="round" stroke-dasharray="${C*p/100} ${C}" transform="rotate(-90 ${cx} ${cy})"/>`:'');
-  }
-  return `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" style="width:100%; display:block;" role="img" aria-label="${o.sub||''} ${o.center||''}">${arcs}
-    <text x="60" y="${o.sub?62:68}" text-anchor="middle" font-size="22" font-weight="800" fill="#23272B">${o.center||''}</text>
-    ${o.sub?`<text x="60" y="80" text-anchor="middle" font-size="9.5" fill="#8A9099">${o.sub}</text>`:''}</svg>`;
-}
-/* 재사용 가능한 기간 선택 탭 (일간/주간/월간/연간) */
-const PERIODS=[['day','일간'],['week','주간'],['month','월간'],['year','연간']];
-function periodTabsHTML(active){
-  return `<div class="period-tabs" role="tablist">`+PERIODS.map(([k,l])=>`<button type="button" role="tab" aria-selected="${k===active}" class="${k===active?'active':''}" data-period="${k}">${l}</button>`).join('')+`</div>`;
-}
-function bindPeriodTabs(root, onChange){
-  root.querySelectorAll('.period-tabs [data-period]').forEach(b=>b.addEventListener('click',()=>onChange(b.getAttribute('data-period'))));
-}
-let statPeriod='day';
-let statAnchor=nowDate();
-function openStatDetail(period){ statPeriod=period||'day'; statAnchor=nowDate(); openDetail('medstatus'); }
-function renderStatDetail(){
-  document.getElementById('detail-body').innerHTML=statDetailHTML();
-  bindStatEvents();
-}
-function weekStartOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()-mondayIndex(x)); return x; }
-function statRange(){
-  const a=statAnchor, y=a.getFullYear(), m=a.getMonth();
-  if(statPeriod==='day') return {start:new Date(y,m,a.getDate()), end:new Date(y,m,a.getDate()), label:fmtDateFull(a)};
-  if(statPeriod==='week'){ const s=weekStartOf(a); const e=new Date(s); e.setDate(s.getDate()+6);
-    return {start:s,end:e,label:`${s.getMonth()+1}월 ${s.getDate()}일 ~ ${e.getMonth()+1}월 ${e.getDate()}일`}; }
-  if(statPeriod==='month') return {start:new Date(y,m,1), end:new Date(y,m+1,0), label:`${y}년 ${m+1}월`};
-  return {start:new Date(y,0,1), end:new Date(y,11,31), label:`${y}년`};
-}
-function statShift(dir){
-  const a=statAnchor;
-  if(statPeriod==='day') statAnchor=new Date(a.getFullYear(),a.getMonth(),a.getDate()+dir);
-  else if(statPeriod==='week') statAnchor=new Date(a.getFullYear(),a.getMonth(),a.getDate()+7*dir);
-  else if(statPeriod==='month') statAnchor=new Date(a.getFullYear(),a.getMonth()+dir,1);
-  else statAnchor=new Date(a.getFullYear()+dir,0,1);
-}
-/* 기간 안의 실제 기록만 집계 (기록이 없는 날은 "기록 없음"으로 두고 숫자를 만들어내지 않는다) */
-function aggRange(start,end){
-  const r={taken:0,missed:0,pending:0,daysFull:0,daysPartial:0,daysMissed:0,daysNoRec:0,perSlot:{}};
-  const d=new Date(start); let guard=0;
-  while(d<=end && guard++<400){
-    const st=daySlotStatuses(d); const vals=Object.entries(st);
-    if(!vals.length){ r.daysNoRec++; }
-    else {
-      vals.forEach(([k,v])=>{
-        if(!r.perSlot[k]) r.perSlot[k]={taken:0,missed:0};
-        if(v==='taken'){ r.taken++; r.perSlot[k].taken++; }
-        else if(v==='missed'){ r.missed++; r.perSlot[k].missed++; }
-        else r.pending++;
-      });
-      const sum=daySummaryStatus(d);
-      if(sum==='full') r.daysFull++; else if(sum==='partial') r.daysPartial++; else if(sum==='missed') r.daysMissed++;
-    }
-    d.setDate(d.getDate()+1);
-  }
-  r.rate = (r.taken+r.missed)>0 ? Math.round(r.taken/(r.taken+r.missed)*100) : null;
-  return r;
-}
-function slotRatesHTML(agg){
-  const keys=Object.keys(agg.perSlot).filter(k=>state.slots.some(s=>s.key===k));
-  if(!keys.length) return '';
-  return `<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">시간대별 이행률</p>`+keys.map(k=>{
-    const v=agg.perSlot[k], t=v.taken+v.missed, p=t?Math.round(v.taken/t*100):0, s=state.slots.find(x=>x.key===k);
-    return `<div class="stat-row" style="cursor:default;"><span class="d">${s.icon} ${escapeHtml(s.label)}</span><span class="bar"><i style="width:${p}%"></i></span><span class="v">${t?p+'%':'-'}</span></div>`;
-  }).join('')+`</div>`;
-}
-function statDetailHTML(){
-  const rg=statRange();
-  const agg=aggRange(rg.start,rg.end);
-  const todayK=dateKey(nowDate());
-  const isCur = dateKey(rg.start)<=todayK && todayK<=dateKey(rg.end);
-  let hero='', body='';
-  if(statPeriod==='day'){
-    const st=daySlotStatuses(rg.start), k=dateKey(rg.start);
-    const slots=state.slots.filter(s=>st[s.key]!==undefined);
-    const done=slots.filter(s=>st[s.key]==='taken').length;
-    hero = slots.length ? `<div class="ring-wrap">${ringSVG({segments:slots.map(s=>st[s.key]), center:`${Math.round(done/slots.length*100)}%`, sub:'하루 복약'})}</div>
-      <p class="big">${slots.length}번 중 ${done}번 완료</p><p class="small">${agg.missed?`놓친 약 ${agg.missed}번`:'놓친 약이 없어요'}</p>`
-      : `<p class="big">기록이 없어요</p><p class="small">이 날은 저장된 복약 기록이 없어요.</p>`;
-    const rows=slots.map(s=>{
-      const v=st[s.key]; const cls=v==='taken'?'done':v==='missed'?'warn':'pending'; const lb=v==='taken'?'완료':v==='missed'?'미복약':'복약 전';
-      const meds=slotMeds(s.key);
-      const medHtml=meds.length>1||meds.some(m=>medDoneOnDate(k,s.key,m.id)) ? `<div style="width:100%; padding:2px 0 4px 54px; font-size:0.93rem;">`+meds.map(m=>{const dn=medDoneOnDate(k,s.key,m.id); return `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>💊 ${escapeHtml(m.name)}</span><b style="color:${dn?'var(--primary-deep)':'var(--text-sub)'};">${dn?'✓ 복용':'미복용'}</b></div>`;}).join('')+`</div>` : '';
-      const mr=getMissReason(k,s.key);
-      return `<div class="med-check-row" style="flex-wrap:wrap;"><div class="med-check-icon">${s.icon}</div><div class="med-check-main"><b>${escapeHtml(s.label)}</b><span>${state.times[slotIndex(s)]}</span></div><span class="status-badge ${cls}">${lb}</span>${medHtml}${mr&&v!=='taken'?`<div style="width:100%; font-size:0.93rem; padding:2px 0 4px 54px;">📝 ${missReasonText(mr)}</div>`:''}</div>`;
-    }).join('');
-    const ses=state.sideEffects.filter(x=>x.date===k);
-    body=`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">시간대별 복약</p>${rows||'<div class="hint-text" style="margin:0;">표시할 기록이 없어요.</div>'}</div>`
-      +(ses.length?`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">😣 불편했던 점</p>${ses.map(x=>`<div class="stat-row" style="cursor:default;"><span style="flex:1;">${x.symptom==='기타'&&x.other?'기타 · '+escapeHtml(x.other):escapeHtml(x.symptom)}</span><span class="v">${escapeHtml(slotLabelByKey(x.slot))}</span></div>`).join('')}</div>`:'');
-  } else {
-    hero = agg.rate===null ? `<p class="big">기록이 없어요</p><p class="small">이 기간에는 저장된 복약 기록이 없어요.</p>`
-      : `<div class="ring-wrap">${ringSVG({progress:agg.rate, center:`${agg.rate}%`, sub:'복약 이행률'})}</div>
-         <p class="big">${agg.taken+agg.missed}번 중 ${agg.taken}번 완료</p><p class="small">놓친 약 ${agg.missed}번${agg.pending?` · 아직 안 한 약 ${agg.pending}번`:''}</p>`;
-    if(statPeriod==='week'){
-      const rows=[]; const d=new Date(rg.start);
-      for(let i=0;i<7;i++){
-        const st=daySlotStatuses(d); const ent=Object.entries(st); const done=ent.filter(e=>e[1]==='taken').length;
-        const dots=ent.length?`<span class="sdots">${ent.map(e=>`<i class="${e[1]==='taken'?'t':e[1]==='missed'?'m':''}"></i>`).join('')}</span>`:`<span class="sdots" style="color:var(--text-faint); font-size:0.9rem;">기록 없음</span>`;
-        rows.push(`<div class="stat-row" data-goto-day="${dateKey(d)}"><span class="d">${d.getMonth()+1}/${d.getDate()} (${DOW[d.getDay()]})</span>${dots}<span class="v">${ent.length?`${done}/${ent.length}`:''}</span></div>`);
-        d.setDate(d.getDate()+1);
-      }
-      body=`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">요일별 복약 · 눌러서 자세히</p>${rows.join('')}</div>`+slotRatesHTML(agg);
-    } else if(statPeriod==='month'){
-      const y=rg.start.getFullYear(), m=rg.start.getMonth(); let cells='';
-      for(let i=0;i<rg.start.getDay();i++) cells+=`<div class="cal-cell empty"></div>`;
-      for(let dd=1; dd<=rg.end.getDate(); dd++){
-        const dt=new Date(y,m,dd), kk=dateKey(dt), cnt=Object.keys(daySlotStatuses(dt)).length;
-        cells+=`<div class="cal-cell ${daySummaryStatus(dt)} ${kk===todayK?'today':''}" data-goto-day="${kk}"><span class="num">${dd}</span>${cnt?`<div class="dots">${'<i></i>'.repeat(Math.min(cnt,4))}</div>`:''}</div>`;
-      }
-      body=`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:6px;">날짜를 누르면 그날 기록이 보여요</p><div class="cal-dow-row"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div><div class="cal-grid">${cells}</div>${legendHTML()}</div>`
-        +`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">한 달 요약</p><div class="stat-row" style="cursor:default;"><span class="d">모두 완료한 날</span><span class="v" style="flex:1;">${agg.daysFull}일</span></div><div class="stat-row" style="cursor:default;"><span class="d">일부만 완료</span><span class="v" style="flex:1;">${agg.daysPartial}일</span></div><div class="stat-row" style="cursor:default;"><span class="d">놓친 날</span><span class="v" style="flex:1;">${agg.daysMissed}일</span></div></div>`+slotRatesHTML(agg);
-    } else {
-      const y=rg.start.getFullYear(); const rows=[];
-      for(let mo=0;mo<12;mo++){
-        const a=aggRange(new Date(y,mo,1), new Date(y,mo+1,0)); const t=a.taken+a.missed;
-        rows.push(`<div class="stat-row" data-goto-month="${mo}"><span class="d">${mo+1}월</span><span class="bar"><i style="width:${a.rate||0}%"></i></span><span class="v">${a.rate===null?'기록 없음':a.rate+'%'}</span></div>`);
-      }
-      body=`<div class="card pad-md"><p class="arc-card-title" style="margin-bottom:4px;">월별 이행률 · 눌러서 자세히</p>${rows.join('')}</div>`+slotRatesHTML(agg);
-    }
-  }
-  return `<div class="stat-range"><button type="button" id="stat-prev" aria-label="이전">‹</button><span class="lbl">${rg.label}</span><button type="button" id="stat-next" aria-label="다음">›</button></div>
-    ${isCur?'':`<div style="text-align:center; margin:-2px 0 4px;"><button type="button" class="month-nav-today" id="stat-today">오늘로 돌아가기</button></div>`}
-    ${periodTabsHTML(statPeriod)}
-    <div class="card pad-md stat-hero">${hero}</div>
-    ${body}`;
-}
-function bindStatEvents(){
-  const root=document.getElementById('detail-body');
-  bindPeriodTabs(root, p=>{ statPeriod=p; renderStatDetail(); });
-  document.getElementById('stat-prev').onclick=()=>{ statShift(-1); renderStatDetail(); };
-  document.getElementById('stat-next').onclick=()=>{ statShift(1); renderStatDetail(); };
-  const td=document.getElementById('stat-today'); if(td) td.onclick=()=>{ statAnchor=nowDate(); renderStatDetail(); };
-  root.querySelectorAll('[data-goto-day]').forEach(el=>el.addEventListener('click',()=>{ statAnchor=parseDateKey(el.getAttribute('data-goto-day')); statPeriod='day'; renderStatDetail(); }));
-  root.querySelectorAll('[data-goto-month]').forEach(el=>el.addEventListener('click',()=>{ statAnchor=new Date(statAnchor.getFullYear(),Number(el.getAttribute('data-goto-month')),1); statPeriod='month'; renderStatDetail(); }));
-}
-
 /* ================= 설정 ================= */
 function renderMypage(){
   document.getElementById('profile-card-btn').innerHTML=`
@@ -1835,11 +1763,10 @@ function openDetail(type){
   currentDetail=type;
   if(!wasMeds && type!=='manage') editingMedId=null;
   const titles={
-    manage:'복약 관리', missreason:'놓친 이유 기록', medstatus:'복약 현황', caregiver:'보호자 연동',
+    manage:'복약 관리', missreason:'놓친 이유 기록', caregiver:'보호자 연동',
     fontsize:'글자 크기 설정', manual:'앱 사용 방법', sideeffect:'불편한 점 기록', profile:'개인정보 보기', notifications:'알림',
   };
   document.getElementById('detail-title').textContent=titles[type]||'';
-  document.getElementById('detail-overlay').classList.toggle('keep-nav', type==='medstatus');
   document.getElementById('detail-body').innerHTML = detailBodyHTML(type);
   bindDetailEvents(type);
   ov.classList.add('show');
@@ -1853,7 +1780,6 @@ function switchHTML(id, checked){
   return `<label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="track"></span><span class="thumb"></span></label>`;
 }
 function detailBodyHTML(type){
-  if(type==='medstatus') return statDetailHTML();
   if(type==='missreason') return missReasonDetailHTML();
   if(type==='manage'){
     return `<p class="arc-card-title" style="margin:6px 2px 8px;">💊 복약 정보 관리</p>`+detailBodyHTML('meds')
@@ -2002,7 +1928,6 @@ function medListHTML(){
   }).join('');
 }
 function bindDetailEvents(type){
-  if(type==='medstatus'){ bindStatEvents(); return; }
   if(type==='missreason'){ bindMissReasonEvents(); return; }
   if(type==='manage'){ bindDetailEvents('meds'); bindDetailEvents('alert'); return; }
   if(type==='sideeffect') bindSideEffectEvents();
@@ -2132,7 +2057,6 @@ function bindDetailEvents(type){
 
 /* ================= NAVIGATION ================= */
 function switchTab(tab){
-  if(currentDetail==='medstatus') closeDetail();
   currentTab=tab;
   document.querySelectorAll('.tab-view').forEach(v=>v.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
@@ -2342,3 +2266,15 @@ function init(){
   }
 }
 init();
+
+/* 오늘 복약 목록(활성 시간대)이 모두 완료되면 complete(), 하나라도 풀리면 undoToday() */
+function syncPlantGrowth(){
+  try{
+    const slots=activeSlots();
+    const allDone = slots.length>0 && slots.every(s=>slotStatusToday(s)==='taken');
+    if(allDone) PlantGrowth.complete(); else PlantGrowth.undoToday();
+    PlantGrowth.render();
+  }catch(e){ console.error(e); }
+}
+
+syncPlantGrowth();

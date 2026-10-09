@@ -12,9 +12,10 @@
 <meta name="apple-mobile-web-app-title" content="복약 알리미">
 <meta name="application-name" content="복약 알리미">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="apple-touch-icon" sizes="180x180" href="./icon-180.png">
-<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./icon-180.png?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png?v=2">
+<link rel="icon" type="image/png" sizes="48x48" href="./favicon-48.png?v=2">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png?v=2">
 <style>
 :root{
   --bg:#F4F6F8;
@@ -616,45 +617,35 @@ button, input{font-family:inherit;}
 .firstrun-box button{margin-top:8px;}
 
 /* ---------- v8: 식물 키우기 / 놓친 이유 ---------- */
-.plant-card{text-align:center; background:linear-gradient(180deg,#F1FBF5 0%,#FFFFFF 100%);}
-.plant-card .plant-title{font-size:1.15rem; font-weight:800; margin:0 0 6px;}
-.plant-card svg{width:100%; max-width:220px; height:auto; display:block; margin:4px auto;}
-.plant-card .plant-main{font-size:1.3rem; font-weight:800; color:var(--primary-deep); margin:6px 0 2px;}
-.plant-card .plant-sub{font-size:1.05rem; font-weight:700; margin:2px 0;}
-.plant-card .plant-hint{font-size:1rem; color:var(--text-sub); margin:2px 0 8px;}
-.plant-dots{display:flex; justify-content:center; gap:8px; margin-top:8px;}
-.plant-dots i{width:14px; height:14px; border-radius:50%; background:#DDE2E6; display:block;}
-.plant-dots i.on{background:var(--primary);}
-.plant-done{background:var(--primary-tint); color:var(--primary-deep); border-radius:12px; padding:10px; font-weight:800; font-size:1.05rem; margin-top:8px;}
 .reason-opt{display:block; width:100%; text-align:left; min-height:56px; padding:12px 16px; margin:8px 0; border-radius:14px; border:1.5px solid var(--line); background:#fff; font-size:1.05rem; font-weight:700; cursor:pointer; color:var(--text);}
 .reason-opt{display:flex; align-items:center; gap:12px; min-height:64px; font-size:1.1rem; line-height:1.4;}
 .reason-opt.on{border-color:var(--primary); background:var(--primary-tint); color:var(--primary-deep);}
 .reason-box{flex:0 0 32px; width:32px; height:32px; border-radius:9px; border:2.5px solid #9AA5AD; background:#fff; display:flex; align-items:center; justify-content:center; font-size:1.2rem; font-weight:900; color:#fff;}
 .reason-opt.on .reason-box{background:var(--primary); border-color:var(--primary);}
 .reason-txt{flex:1; min-width:0; overflow-wrap:anywhere;}
-
-/* ---------- v9: 홈 → 복약 상세, 일간·주간·월간·연간 전환 ---------- */
-.detail-overlay.keep-nav{bottom:calc(68px + env(safe-area-inset-bottom));}
-.period-tabs{display:flex; gap:2px; background:#E6E9ED; border-radius:12px; padding:3px; margin:6px 0 12px;}
-.period-tabs button{flex:1; min-height:44px; border:none; background:transparent; border-radius:10px; font-size:1rem; font-weight:700; color:var(--text-sub); cursor:pointer;}
-.period-tabs button.active{background:#fff; color:var(--text); font-weight:800; box-shadow:var(--shadow);}
-.stat-range{display:flex; align-items:center; gap:8px; margin:2px 0 4px;}
-.stat-range .lbl{flex:1; text-align:center; font-size:1.05rem; font-weight:800;}
-.stat-range button{min-width:44px; min-height:44px; border:1.5px solid var(--line); background:#fff; border-radius:12px; font-size:1.2rem; cursor:pointer;}
-.stat-hero{text-align:center;}
-.stat-hero .ring-wrap{width:100%; max-width:200px; margin:0 auto;}
-.stat-hero .big{font-size:1.5rem; font-weight:800; margin:6px 0 2px;}
-.stat-hero .small{font-size:1rem; color:var(--text-sub); margin:0;}
-.stat-row{display:flex; align-items:center; gap:10px; padding:13px 0; border-bottom:1px solid var(--line); cursor:pointer;}
-.stat-row:last-child{border-bottom:none;}
-.stat-row .d{min-width:84px; font-size:1rem; font-weight:700;}
-.stat-row .bar{flex:1; height:10px; border-radius:6px; background:#E6E9ED; overflow:hidden;}
-.stat-row .bar i{display:block; height:100%; background:var(--primary);}
-.stat-row .v{min-width:70px; text-align:right; font-size:0.95rem; font-weight:700; color:var(--text-sub);}
-.sdots{display:flex; gap:5px; flex:1;}
-.sdots i{width:14px; height:14px; border-radius:50%; background:#DDE2E6; display:inline-block;}
-.sdots i.t{background:var(--primary);} .sdots i.m{background:var(--coral);}
-.home-ring-wrap{width:100%; max-width:190px; margin:6px auto 0;}
+/* ---- 7일 화분 키우기 ---- */
+.plant-card{
+  background:#F2FBF6; border:2px solid #CDEFDD; border-radius:20px;
+  padding:18px 16px 20px; max-width:420px; margin:0 auto;
+  font-family:inherit; color:#1F3A2E; text-align:center;
+}
+.plant-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:4px}
+.plant-title{font-size:20px; font-weight:800}
+.plant-flowers{font-size:17px; font-weight:700; color:#C2456B}
+.plant-svg{width:100%; max-width:260px; height:auto; display:block; margin:0 auto}
+.p-part{transform-box:fill-box; transform-origin:50% 100%;
+  transition:transform .8s cubic-bezier(.34,1.56,.64,1), opacity .5s}
+.p-part.p-off{transform:scale(0); opacity:0}
+.plant-dots{display:flex; justify-content:center; gap:8px; margin:6px 0 12px}
+.plant-dot{width:34px; height:34px; border-radius:50%; border:2px solid #CDEFDD; background:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; color:#9BB8A9}
+.plant-dot.on{background:#1DB876; border-color:#1DB876; color:#fff}
+.plant-dot.today{box-shadow:0 0 0 3px #FFD166}
+.plant-msg{font-size:21px; font-weight:800; line-height:1.4; margin:0 0 4px; word-break:keep-all}
+.plant-sub{font-size:17px; color:#4D6B5C; line-height:1.4; margin:0; word-break:keep-all}
+.plant-card.bloom .plant-svg{animation:plantJoy 1s ease 1}
+@keyframes plantJoy{0%,100%{transform:scale(1)}40%{transform:scale(1.06)}}
+@media (prefers-reduced-motion:reduce){.p-part{transition:none}.plant-card.bloom .plant-svg{animation:none}}
 </style>
 </head>
 <body>
@@ -668,7 +659,6 @@ button, input{font-family:inherit;}
       <button class="icon-btn" id="bell-btn" aria-label="알림">🔔<span class="badge-dot" id="bell-dot"></span></button>
     </div>
     <div class="greeting-block">
-      <p class="sub-line" id="home-date" style="font-weight:700; color:var(--primary-deep); margin-bottom:2px;"></p>
       <p class="hello" id="home-hello"></p>
       <p class="name-line" id="home-name"></p>
       <p class="sub-line">오늘도 건강한 하루 보내세요!</p>
@@ -689,7 +679,85 @@ button, input{font-family:inherit;}
         </div>
       </div>
 
-      <div class="card pad-md plant-card" id="home-plant-card"></div>
+      <div style="margin-top:14px;"><div class="plant-card" id="plantCard">
+  <div class="plant-head">
+    <span class="plant-title">🌱 나의 화분</span>
+    <span class="plant-flowers" id="plantFlowers"></span>
+  </div>
+
+  <svg class="plant-svg" viewBox="0 0 200 230" aria-hidden="true">
+    <!-- 꽃 피었을 때 반짝이 -->
+    <g class="p-part" data-min="7" style="transform-origin:50% 50%">
+      <path d="M40 60 l4 10 l10 4 l-10 4 l-4 10 l-4-10 l-10-4 l10-4z" fill="#FFD166"/>
+      <path d="M162 40 l3 7 l7 3 l-7 3 l-3 7 l-3-7 l-7-3 l7-3z" fill="#FFD166"/>
+      <path d="M158 110 l2 5 l5 2 l-5 2 l-2 5 l-2-5 l-5-2 l5-2z" fill="#FFB3C6"/>
+    </g>
+
+    <!-- 2일째: 작은 싹 -->
+    <g class="p-part" data-min="2" data-max="2">
+      <path d="M100 162 Q98 152 101 144" stroke="#3FAE5A" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M101 145 Q110 136 116 141 Q109 149 101 145Z" fill="#6BCB77"/>
+    </g>
+
+    <!-- 3일째: 떡잎 -->
+    <g class="p-part" data-min="3" data-max="3">
+      <path d="M100 162 Q97 146 100 128" stroke="#3FAE5A" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M100 129 Q84 114 72 122 Q84 136 100 129Z" fill="#6BCB77"/>
+      <path d="M100 129 Q116 114 128 122 Q116 136 100 129Z" fill="#6BCB77"/>
+    </g>
+
+    <!-- 4일째: 줄기 자람 -->
+    <path class="p-part" data-min="4" data-max="4" d="M100 162 Q94 136 100 106" stroke="#3FAE5A" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <!-- 5일째 이후: 긴 줄기 -->
+    <path class="p-part" data-min="5" d="M100 162 Q92 122 100 80" stroke="#3FAE5A" stroke-width="6" fill="none" stroke-linecap="round"/>
+
+    <!-- 4일째부터: 아래 잎 -->
+    <path class="p-part" data-min="4" style="transform-origin:100% 50%" d="M98 138 Q74 120 58 132 Q76 150 98 138Z" fill="#4DBF68"/>
+    <path class="p-part" data-min="4" style="transform-origin:0% 50%" d="M99 128 Q122 110 140 120 Q122 140 99 128Z" fill="#4DBF68"/>
+    <!-- 5일째부터: 위 잎 -->
+    <path class="p-part" data-min="5" style="transform-origin:100% 50%" d="M97 108 Q78 92 64 100 Q80 116 97 108Z" fill="#6BCB77"/>
+    <path class="p-part" data-min="5" style="transform-origin:0% 50%" d="M99 100 Q118 86 132 94 Q116 110 99 100Z" fill="#6BCB77"/>
+
+    <!-- 6일째: 꽃봉오리 -->
+    <g class="p-part" data-min="6" data-max="6">
+      <ellipse cx="100" cy="68" rx="11" ry="16" fill="#FF8FAB"/>
+      <path d="M88 76 Q92 86 100 84 Q108 86 112 76 Q106 82 100 80 Q94 82 88 76Z" fill="#3FAE5A"/>
+    </g>
+
+    <!-- 7일째: 꽃 -->
+    <g class="p-part" data-min="7" style="transform-origin:50% 50%">
+      <g fill="#FF8FAB">
+        <ellipse cx="100" cy="46" rx="13" ry="19"/>
+        <ellipse cx="100" cy="46" rx="13" ry="19" transform="rotate(60 100 68)"/>
+        <ellipse cx="100" cy="46" rx="13" ry="19" transform="rotate(120 100 68)"/>
+        <ellipse cx="100" cy="46" rx="13" ry="19" transform="rotate(180 100 68)"/>
+        <ellipse cx="100" cy="46" rx="13" ry="19" transform="rotate(240 100 68)"/>
+        <ellipse cx="100" cy="46" rx="13" ry="19" transform="rotate(300 100 68)"/>
+      </g>
+      <circle cx="100" cy="68" r="15" fill="#FFD166"/>
+      <circle cx="95" cy="66" r="1.8" fill="#5A3E1B"/>
+      <circle cx="105" cy="66" r="1.8" fill="#5A3E1B"/>
+      <path d="M95 71 Q100 76 105 71" stroke="#5A3E1B" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    </g>
+
+    <!-- 화분 -->
+    <path d="M48 166 L152 166 L142 222 L58 222 Z" fill="#E9A06B"/>
+    <rect x="42" y="156" width="116" height="16" rx="6" fill="#D98A54"/>
+    <ellipse cx="100" cy="160" rx="52" ry="6" fill="#6B4423"/>
+
+    <!-- 0~1일째: 씨앗 -->
+    <g class="p-part" data-min="0" data-max="1" style="transform-origin:50% 50%">
+      <ellipse cx="100" cy="156" rx="9" ry="6" fill="#8B5A2B" transform="rotate(-15 100 156)"/>
+      <path d="M95 154 Q99 152 103 153" stroke="#B07A45" stroke-width="1.5" fill="none"/>
+    </g>
+    <!-- 1일째: 씨앗이 갈라지며 싹 기운 -->
+    <path class="p-part" data-min="1" data-max="1" d="M101 151 Q103 145 100 141" stroke="#7ED957" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  </svg>
+
+  <div class="plant-dots" id="plantDots"></div>
+  <p class="plant-msg" id="plantMsg"></p>
+  <p class="plant-sub" id="plantSub"></p>
+</div></div>
 
       <button class="home-big-btn" id="home-register-btn" type="button"></button>
 
