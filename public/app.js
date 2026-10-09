@@ -449,6 +449,7 @@ function resetAllData(){
   state.notifLog=[];
   state.sideEffects=[];
   state.medChecks={};
+  medDraft={};
   state.manualSeen=true; // 삭제 직후 첫 실행 안내가 다시 뜨지 않게
 
   checkSelectedSlot=null;
@@ -828,17 +829,21 @@ function renderCheck(){
 
   const meds=slotMeds(slot.key);
   const check=status==='taken';
-  const locked = status!=='pending';
+  const editable=slotEditable(slot);
+  const draftIds=medDraftIds(slot.key);
   document.getElementById('check-med-list').innerHTML = meds.length ? `
-    ${(!check && !locked) ? `<p class="hint-text" style="margin:0 0 6px;">먹은 약을 눌러 체크한 뒤, 아래 '복약 완료'를 눌러 주세요. (${medCheckedCount(slot.key)}/${meds.length})</p>` : ''}` + meds.map(m=>{
-      const on=medCheckedToday(slot.key,m.id);
-      return `<div class="med-check-row" data-med-row="${m.id}" style="${locked?'':'cursor:pointer;'} min-height:64px;">
+    ${editable ? `<p class="hint-text" style="margin:0 0 6px;">먹은 약을 눌러 체크한 뒤, 아래 버튼을 눌러 주세요.${meds.length>1?` (복용 완료 ${medCheckedCount(slot.key)}/${meds.length})`:''}</p>` : ''}` + meds.map(m=>{
+      const done=medCheckedToday(slot.key,m.id);
+      const sel=draftIds.includes(m.id);
+      const mark = (done||sel) ? '✓' : '';
+      const sub = done ? '복용 완료' : slot.intent;
+      return `<div class="med-check-row" data-med-row="${m.id}" style="${(editable&&!done)?'cursor:pointer;':''} min-height:64px; ${sel?'background:var(--primary-tint);':''}">
       <div class="med-check-icon">💊</div>
-      <div class="med-check-main"><b>${escapeHtml(m.name)} ${m.dose||''}</b><span>${slot.intent}</span></div>
-      <div class="check-circle ${on?'on':''}" style="width:40px;height:40px;">${on?'✓':''}</div>
+      <div class="med-check-main"><b>${escapeHtml(m.name)} ${m.dose||''}</b><span>${sub}</span></div>
+      <div class="check-circle ${(done||sel)?'on':''}" style="width:40px;height:40px;">${mark}</div>
     </div>`;}).join('') : `<div class="hint-text">이 시간대에 등록된 약이 없어요. 설정 > 복약 관리에서 약을 등록해보세요.</div>`;
   document.querySelectorAll('#check-med-list [data-med-row]').forEach(row=>{
-    row.addEventListener('click', ()=>{ if(!locked) toggleMedCheck(slot.key, row.getAttribute('data-med-row')); });
+    row.addEventListener('click', ()=>toggleMedDraft(slot.key, row.getAttribute('data-med-row')));
   });
 
   const btn=document.getElementById('check-confirm-btn');
@@ -849,13 +854,13 @@ function renderCheck(){
     btn.style.display='none';
     threeWayEl.style.display='';
     threeWayEl.innerHTML=`
-      <p class="hint-text" style="margin:0 0 10px; text-align:center;">${slot.label} 약, 어떻게 하셨나요?</p>
+      <p class="hint-text" style="margin:0 0 10px; text-align:center;">${slot.label} 약, 어떻게 하셨나요?${meds.length>1?'<br>일부만 드셨다면 먹은 약만 눌러 체크하고 "복용함"을 눌러 주세요.':''}</p>
       <div style="display:flex; gap:8px;">
         <button class="btn-primary" id="three-taken" style="flex:1;">복용함</button>
         <button class="btn-outline" id="three-skip" style="flex:1;">건너뜀</button>
         <button class="btn-outline" id="three-later" style="flex:1;">나중에</button>
       </div>`;
-    document.getElementById('three-taken').onclick=()=>toggleSlot(slot.key);
+    document.getElementById('three-taken').onclick=()=>{ if(medDraftIds(slot.key).length) commitSelectedMeds(slot.key); else toggleSlot(slot.key); };
     document.getElementById('three-skip').onclick=()=>skipSlotNow(slot.key);
     document.getElementById('three-later').onclick=()=>snoozeSlotNow(slot.key);
   } else {
@@ -863,14 +868,14 @@ function renderCheck(){
     threeWayEl.innerHTML='';
     btn.style.display='';
     if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
-    else if(status==='missed'){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
+    else if(!editable){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
     else {
-      const total=slotMeds(slot.key).length, done=medCheckedCount(slot.key);
-      if(total>0 && done<total){ btn.textContent=`먹은 약을 눌러 체크해 주세요 (${done}/${total})`; btn.disabled=true; }
-      else { btn.textContent='복약 완료'; btn.disabled=false; }
+      const n=draftIds.length;
+      btn.textContent = n===0 ? '먹은 약을 체크해 주세요' : `선택한 약 ${n}개 복용 완료`;
+      btn.disabled = n===0;
       btn.style.background='';
     }
-    btn.onclick=()=>toggleSlot(slot.key);
+    btn.onclick=()=>commitSelectedMeds(slot.key);
   }
 
   document.getElementById('check-encourage-slot').innerHTML = status==='taken' ? `
@@ -906,13 +911,36 @@ function setMedChecked(slotKey, medId, on){
   if(!state.medChecks[k][slotKey]) state.medChecks[k][slotKey]={};
   if(on) state.medChecks[k][slotKey][medId]=true; else delete state.medChecks[k][slotKey][medId];
 }
-/* 약 하나만 체크/해제. 그 시간대의 약을 전부 체크하면 그때 시간대가 "복약 완료"가 된다. */
-function toggleMedCheck(slotKey, medId){
+/* ---- 선택(임시) → 복약 완료 버튼으로 확정 ----
+   약을 눌러 "선택"만 해두고(medDraft, 저장 안 함), 버튼을 눌렀을 때 선택한 약만 medChecks에 기록한다.
+   선택하지 않은 약은 그대로(미확인) 남고, 나중에 다시 선택해서 확정할 수 있다. */
+let medDraft={}; // { slotKey: { medId:true } }  (화면 선택 상태, 세션 한정)
+function medDraftIds(slotKey){
+  const ids=Object.keys(medDraft[slotKey]||{});
+  return slotMeds(slotKey).filter(m=>ids.includes(m.id) && !medCheckedToday(slotKey,m.id)).map(m=>m.id);
+}
+function slotEditable(slot){
+  if(slot.taken || slot.skipped) return false;
+  return slotStatusToday(slot)==='pending' || medCheckedCount(slot.key)>0;
+}
+function toggleMedDraft(slotKey, medId){
   const slot=state.slots.find(s=>s.key===slotKey);
-  if(!slot || slot.taken || slotStatusToday(slot)==='missed') return;
-  const was=medCheckedToday(slotKey, medId);
-  setMedChecked(slotKey, medId, !was);
-  // 약을 눌러도 바로 "복약 완료"가 되지 않는다. 아래 '복약 완료' 버튼을 눌러야 확정된다.
+  if(!slot || !slotEditable(slot) || medCheckedToday(slotKey,medId)) return;
+  if(!medDraft[slotKey]) medDraft[slotKey]={};
+  if(medDraft[slotKey][medId]) delete medDraft[slotKey][medId]; else medDraft[slotKey][medId]=true;
+  renderCheck();
+}
+/* 선택한 약만 복용 완료로 기록. 그 시간대 약이 전부 확정되면 시간대가 "복약 완료"가 된다. */
+function commitSelectedMeds(slotKey){
+  const slot=state.slots.find(s=>s.key===slotKey);
+  if(!slot || slot.taken) return;
+  const ids=medDraftIds(slotKey);
+  if(!ids.length) return;
+  ids.forEach(id=>setMedChecked(slotKey,id,true));
+  medDraft[slotKey]={};
+  const meds=slotMeds(slotKey);
+  if(meds.every(m=>medCheckedToday(slotKey,m.id))){ toggleSlot(slotKey); return; }
+  toast(`선택한 약 ${ids.length}개를 복용 완료로 기록했어요. 남은 약은 나중에 체크해 주세요.`);
   saveState();
   renderAll();
 }
@@ -1063,8 +1091,9 @@ function perMedRowsHTML(slot, key, slotSt, isFuture){
   if(meds.length<2 && !anyChecked) return '';
   return `<div style="width:100%; padding:2px 0 4px 58px; font-size:0.92rem;">`+meds.map(m=>{
     const done = slotSt==='taken' || !!checks[m.id];
-    const lbl = done ? '✓ 복용' : (slotSt==='missed' ? '미복용' : '복약 전');
-    return `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>💊 ${escapeHtml(m.name)}</span><b style="color:${done?'var(--primary-deep)':(slotSt==='missed'?'#C4432F':'var(--text-sub)')};">${lbl}</b></div>`;
+    const partial = Object.keys(checks).length>0;
+    const lbl = done ? '✓ 복용' : (partial ? '미확인' : (slotSt==='missed' ? '미복용' : '복약 전'));
+    return `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>💊 ${escapeHtml(m.name)}</span><b style="color:${done?'var(--primary-deep)':((slotSt==='missed'&&!partial)?'#C4432F':'var(--text-sub)')};">${lbl}</b></div>`;
   }).join('')+`</div>`;
 }
 function legendHTML(){
