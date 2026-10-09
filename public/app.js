@@ -1169,7 +1169,7 @@ function recordScheduleHTML(){
          <div style="font-size:2rem;">💊</div>
          <p class="hint-text" style="margin:8px 0 0;">등록된 약이 없어서 아직 보여드릴 일정이 없어요.</p>
        </div>`
-    : `<div class="arc-wrap">${buildArcSVG(slots)}</div>${slotChipRowHTML(slots)}`;
+    : `<div class="home-ring-wrap">${ringSVG({segments:slots.map(slotStatusToday), center:`${Math.round(slots.filter(s=>slotStatusToday(s)==='taken').length/slots.length*100)}%`, sub:'오늘 복약'})}</div>${slotChipRowHTML(slots)}`;
   return `
     <div class="card pad-sm" style="display:flex; align-items:center; justify-content:space-between;">
       <b style="font-size:0.98rem;">${fmtDateFull(nowDate())}</b><span>📅</span>
@@ -1206,6 +1206,7 @@ function recordLogHTML(){
     cells+=`<div class="cal-cell ${cls}" data-date="${kStr}"><span class="num">${d}</span>${dots}</div>`;
   }
 
+  logFilter='all'; // 시간대 선택 영역 삭제 → 항상 전체 시간대를 보여준다
   const filterSlots=[{key:'all',label:'전체',icon:''}].concat(slots.map(s=>({key:s.key,label:s.label,icon:s.icon})));
   const chips=filterSlots.map(f=>`<button class="chip-filter ${logFilter===f.key?'active':''}" data-filter="${f.key}">${f.icon?f.icon+' ':''}${f.label}</button>`).join('');
 
@@ -1227,7 +1228,6 @@ function recordLogHTML(){
   }).join('') : `<div class="hint-text" style="margin:0;">이 날짜에는 표시할 복약 기록이 없어요.</div>`;
 
   return `
-    <div class="chip-filter-row">${chips}</div>
     <div class="month-nav">
       <button id="log-prev-month">‹</button>
       <b>${y}년 ${m+1}월</b>
