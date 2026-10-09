@@ -830,7 +830,7 @@ function renderCheck(){
   const check=status==='taken';
   const locked = status!=='pending';
   document.getElementById('check-med-list').innerHTML = meds.length ? `
-    ${(!check && !locked && meds.length>1) ? `<p class="hint-text" style="margin:0 0 6px;">먹은 약을 하나씩 눌러 체크하세요. (${medCheckedCount(slot.key)}/${meds.length})</p>` : ''}` + meds.map(m=>{
+    ${(!check && !locked) ? `<p class="hint-text" style="margin:0 0 6px;">먹은 약을 눌러 체크한 뒤, 아래 '복약 완료'를 눌러 주세요. (${medCheckedCount(slot.key)}/${meds.length})</p>` : ''}` + meds.map(m=>{
       const on=medCheckedToday(slot.key,m.id);
       return `<div class="med-check-row" data-med-row="${m.id}" style="${locked?'':'cursor:pointer;'} min-height:64px;">
       <div class="med-check-icon">💊</div>
@@ -864,7 +864,12 @@ function renderCheck(){
     btn.style.display='';
     if(status==='taken'){ btn.textContent='✅ 복약 완료'; btn.disabled=true; btn.style.background=''; }
     else if(status==='missed'){ btn.textContent='미복약으로 기록됨'; btn.disabled=true; btn.style.background=''; }
-    else { btn.textContent = slotMeds(slot.key).length>1 ? '남은 약 모두 먹었어요' : '확인 완료'; btn.disabled=false; btn.style.background=''; }
+    else {
+      const total=slotMeds(slot.key).length, done=medCheckedCount(slot.key);
+      if(total>0 && done<total){ btn.textContent=`먹은 약을 눌러 체크해 주세요 (${done}/${total})`; btn.disabled=true; }
+      else { btn.textContent='복약 완료'; btn.disabled=false; }
+      btn.style.background='';
+    }
     btn.onclick=()=>toggleSlot(slot.key);
   }
 
@@ -907,8 +912,7 @@ function toggleMedCheck(slotKey, medId){
   if(!slot || slot.taken || slotStatusToday(slot)==='missed') return;
   const was=medCheckedToday(slotKey, medId);
   setMedChecked(slotKey, medId, !was);
-  const meds=slotMeds(slotKey);
-  if(meds.length && meds.every(m=>medCheckedToday(slotKey,m.id))){ toggleSlot(slotKey); return; }
+  // 약을 눌러도 바로 "복약 완료"가 되지 않는다. 아래 '복약 완료' 버튼을 눌러야 확정된다.
   saveState();
   renderAll();
 }
